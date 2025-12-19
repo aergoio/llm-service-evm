@@ -116,14 +116,14 @@ provider = new ethers.JsonRpcProvider(networkConfig.rpc);
 
 // Read or generate an account for this node
 try {
-  const privateKeyHex = fs.readFileSync(__dirname + '/account-evm.data', 'utf8').trim();
+  const privateKeyHex = fs.readFileSync(__dirname + '/account.data', 'utf8').trim();
   console.log('Reading account from file...');
   wallet = new ethers.Wallet(privateKeyHex, provider);
 } catch (err) {
   if (err.code == 'ENOENT') {
     console.log('Generating new account...');
     wallet = ethers.Wallet.createRandom().connect(provider);
-    fs.writeFileSync(__dirname + '/account-evm.data', wallet.privateKey);
+    fs.writeFileSync(__dirname + '/account.data', wallet.privateKey);
   } else {
     console.error(err);
     process.exit(1);
