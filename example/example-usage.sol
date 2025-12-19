@@ -15,7 +15,6 @@ contract LLMTest is ILLMServiceCallback {
 
     address public owner;
     ILLMService public llmService;
-    uint256 public llmServicePrice;
 
     string public lastResult;
 
@@ -26,7 +25,6 @@ contract LLMTest is ILLMServiceCallback {
     event RequestSubmitted(uint256 indexed requestId, address indexed sender, bytes32 configHash);
     event LLMResult(uint256 indexed requestId, address indexed sender, string result);
     event ServiceAddressUpdated(address indexed newAddress);
-    event ServicePriceUpdated(uint256 newPrice);
 
     // ============================================================
     //                         MODIFIERS
@@ -44,14 +42,12 @@ contract LLMTest is ILLMServiceCallback {
     /**
      * @notice Initialize the test contract
      * @param _llmService Address of the LLM service contract
-     * @param _llmServicePrice Price for LLM service calls
      */
-    constructor(address _llmService, uint256 _llmServicePrice) {
+    constructor(address _llmService) {
         require(_llmService != address(0), "LLMTest: invalid service address");
 
         owner = msg.sender;
         llmService = ILLMService(_llmService);
-        llmServicePrice = _llmServicePrice;
     }
 
     // ============================================================
@@ -68,15 +64,6 @@ contract LLMTest is ILLMServiceCallback {
         emit ServiceAddressUpdated(_llmService);
     }
 
-    /**
-     * @notice Update the LLM service price
-     * @param _price New price in wei
-     */
-    function setLLMServicePrice(uint256 _price) external onlyOwner {
-        llmServicePrice = _price;
-        emit ServicePriceUpdated(_price);
-    }
-
     // ============================================================
     //                      MAIN FUNCTIONS
     // ============================================================
@@ -88,8 +75,6 @@ contract LLMTest is ILLMServiceCallback {
      * @return requestId The LLM service request ID
      */
     function newRequest(bytes32 configHash, string calldata userInput) external payable returns (uint256 requestId) {
-        require(msg.value >= llmServicePrice, "LLMTest: insufficient payment");
-
         // Build the input JSON string
         string memory input = string(abi.encodePacked(
             '{"user_input":"',
@@ -99,7 +84,7 @@ contract LLMTest is ILLMServiceCallback {
 
         // Call the LLM service
         // Parameters: platform, model, prompt, input, redundancy, returnContentWithinResultTag, storeResultOffchain, callback, args
-        requestId = llmService.newRequest{value: llmServicePrice}(
+        requestId = llmService.newRequest{value: msg.value}(
             bytes32(0),                    // platform (use from config)
             bytes32(0),                    // model (use from config)
             configHash,                    // prompt hash
@@ -149,26 +134,4 @@ contract LLMTest is ILLMServiceCallback {
     function getLastResult() external view returns (string memory) {
         return lastResult;
     }
-
-    /**
-     * @notice Get the current service price
-     * @return The price in wei
-     */
-    function getServicePrice() external view returns (uint256) {
-        return llmServicePrice;
-    }
-
-    // ============================================================
-    //                    UTILITY FUNCTIONS
-    // ============================================================
-
-    /**
-     * @notice Receive function to accept ETH
-     */
-    receive() external payable {}
-
-    /**
-     * @notice Fallback function
-     */
-    fallback() external payable {}
 }
