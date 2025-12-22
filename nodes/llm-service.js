@@ -3,7 +3,50 @@ const process = require('process');
 const fs = require('fs');
 const { initialize_event_handling } = require('./contract-events.js');
 const { process_llm_request } = require('./llm-requests.js');
-const { getContent, storeContent } = require('./storage.js');
+
+// Storage service configuration
+// Default to production storage service; override with STORAGE_SERVICE_URL env var for local dev
+const STORAGE_SERVICE_URL = process.env.STORAGE_SERVICE_URL || 'https://storage.aergo.app';
+
+// HTTP client for storage service
+async function getContent(hash) {
+  try {
+    const response = await fetch(`${STORAGE_SERVICE_URL}/content/${hash}`);
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      console.error(`Storage service error: ${response.status}`);
+      return null;
+    }
+    const buffer = await response.arrayBuffer();
+    return Buffer.from(buffer);
+  } catch (error) {
+    console.error('Error fetching content from storage service:', error.message);
+    return null;
+  }
+}
+
+async function storeContent(content) {
+  try {
+    const response = await fetch(`${STORAGE_SERVICE_URL}/store`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: content
+    });
+    if (!response.ok) {
+      throw new Error(`Storage service error: ${response.status}`);
+    }
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to store content');
+    }
+    return data.hash;
+  } catch (error) {
+    console.error('Error storing content to storage service:', error.message);
+    throw error;
+  }
+}
 
 // Contract ABI - only the functions/events we need
 const CONTRACT_ABI = [
@@ -200,14 +243,14 @@ async function is_request_pending(request_id) {
   return status === "OK";
 }
 
-// Resolve content from hash using local storage
-function resolveContentFromHash(hash) {
+// Resolve content from hash using storage service
+async function resolveContentFromHash(hash) {
   if (!hash || typeof hash !== 'string') {
     return null;
   }
   // If it's a valid SHA256 hash (64 hex chars), try to retrieve from storage
   if (/^[a-f0-9]{64}$/i.test(hash)) {
-    const content = getContent(hash);
+    const content = await getContent(hash);
     // Convert Buffer to string if needed
     return Buffer.isBuffer(content) ? content.toString('utf8') : content;
   }
@@ -261,7 +304,7 @@ function parseConfig(content) {
 }
 
 // Build the full prompt from config and user inputs
-function buildPrompt(config, inputs) {
+async function buildPrompt(config, inputs) {
   let prompt = config.prompt || '';
 
   // inputs from Solidity is a JSON string, parse it
@@ -278,7 +321,7 @@ function buildPrompt(config, inputs) {
   // Supports {{key}} style placeholders
   if (inputObj && typeof inputObj === 'object') {
     for (const [key, valueHash] of Object.entries(inputObj)) {
-      const resolvedValue = resolveContentFromHash(valueHash);
+      const resolvedValue = await resolveContentFromHash(valueHash);
       if (resolvedValue !== null) {
         // Replace {{key}} with the resolved value
         const placeholder = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g');
@@ -408,7 +451,7 @@ async function on_llm_request(event, is_new) {
 
     // Retrieve config from storage using the prompt hash
     // Config format: first line is platform/model, rest is the prompt
-    const configBuffer = getContent(promptHash);
+    const configBuffer = await getContent(promptHash);
 
     if (!configBuffer) {
       console.error(`Config not found in storage for hash: ${promptHash}`);
@@ -443,7 +486,7 @@ async function on_llm_request(event, is_new) {
     }
 
     // Build the prompt from config and resolve input hashes
-    const prompt = buildPrompt(config, input);
+    const prompt = await buildPrompt(config, input);
     console.log("Built prompt:", prompt.substring(0, 200) + (prompt.length > 200 ? '...' : ''));
 
     // Process the LLM request
@@ -459,7 +502,7 @@ async function on_llm_request(event, is_new) {
 
         // Store result off-chain and return hash if flag is set
         if (storeResultOffchain) {
-          const hash = storeContent(result);
+          const hash = await storeContent(result);
           console.log(`Stored result off-chain, hash: ${hash}`);
           result = hash;
         }
