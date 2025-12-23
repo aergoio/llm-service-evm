@@ -17,24 +17,40 @@ function get_last_processed_block_file_path(contract_address) {
   return path.join(CONFIG_PATH, contract_address.toLowerCase() + '.last-processed-block');
 }
 
-// Function to read last processed block from file
-function get_last_processed_block(contract_address) {
+// Function to read last processed event from file
+function get_last_processed_event(contract_address) {
   try {
     const filePath = get_last_processed_block_file_path(contract_address);
-    const blockHeight = fs.readFileSync(filePath).toString();
-    return parseInt(blockHeight);
+    const content = fs.readFileSync(filePath, 'utf8');
+
+    // Try to parse as JSON first (new format)
+    try {
+      const data = JSON.parse(content);
+      return {
+        block: data.block || 0,
+        logIndex: data.logIndex !== undefined ? data.logIndex : -1
+      };
+    } catch {
+      // Fall back to old format (just block number)
+      const block = parseInt(content);
+      return {
+        block: isNaN(block) ? 0 : block,
+        logIndex: -1  // Unknown, will re-process events from this block
+      };
+    }
   } catch (err) {
-    return 0;
+    return { block: 0, logIndex: -1 };
   }
 }
 
-// Function to write last processed block to file
-function write_last_processed_block(contract_address, blockHeight) {
+// Function to write last processed event to file
+function write_last_processed_event(contract_address, block, logIndex) {
   try {
     const filePath = get_last_processed_block_file_path(contract_address);
-    fs.writeFileSync(filePath, blockHeight.toString());
+    const data = JSON.stringify({ block, logIndex });
+    fs.writeFileSync(filePath, data);
   } catch (err) {
-    console.error('Error writing last processed block to file:', err);
+    console.error('Error writing last processed event to file:', err);
   }
 }
 
@@ -113,14 +129,14 @@ async function get_past_events(contract_instance, contract_address, on_contract_
     start_block += BLOCK_RANGE;
   }
 
-  // Update the last processed block (in memory and file)
-  // If we processed events, lastProcessedBlock is already set to the last event's block
+  // Update the last processed event (in memory and file)
+  // If we processed events, lastProcessedBlock/logIndex are already set
   // If no events, we still need to update to last_block to mark that range as processed
   if (lastProcessedBlock < last_block) {
     lastProcessedBlock = last_block;
     lastProcessedLogIndex = Infinity;  // No events in this block, skip all from subscription
   }
-  write_last_processed_block(contract_address, last_block);
+  write_last_processed_event(contract_address, lastProcessedBlock, lastProcessedLogIndex);
 }
 
 // Normalize EVM event to match the expected format
@@ -180,7 +196,7 @@ async function subscribe_to_events(contract_instance, contract_address, on_contr
 
     lastProcessedBlock = blockNumber;
     lastProcessedLogIndex = logIndex;
-    write_last_processed_block(contract_address, blockNumber);
+    write_last_processed_event(contract_address, blockNumber, logIndex);
   });
 
   // Subscribe to NodeAdded events
@@ -207,7 +223,7 @@ async function subscribe_to_events(contract_instance, contract_address, on_contr
 
     lastProcessedBlock = blockNumber;
     lastProcessedLogIndex = logIndex;
-    write_last_processed_block(contract_address, blockNumber);
+    write_last_processed_event(contract_address, blockNumber, logIndex);
   });
 
   // Subscribe to NodeRemoved events
@@ -234,7 +250,7 @@ async function subscribe_to_events(contract_instance, contract_address, on_contr
 
     lastProcessedBlock = blockNumber;
     lastProcessedLogIndex = logIndex;
-    write_last_processed_block(contract_address, blockNumber);
+    write_last_processed_event(contract_address, blockNumber, logIndex);
   });
 }
 
@@ -243,7 +259,10 @@ async function update_block_height(contract_address) {
   try {
     const blockNumber = await provider.getBlockNumber();
     console.log("Current block:", blockNumber);
-    write_last_processed_block(contract_address, blockNumber);
+    // Update to current block with Infinity logIndex (no events to process)
+    lastProcessedBlock = blockNumber;
+    lastProcessedLogIndex = Infinity;
+    write_last_processed_event(contract_address, blockNumber, Infinity);
   } catch (err) {
     console.error('Error updating block height:', err);
   }
@@ -275,11 +294,10 @@ async function initialize_event_handling(provider_instance, contract_instance, c
     throw new Error('on_contract_event_callback must be a function');
   }
 
-  // Initialize lastProcessedBlock from file
-  // Set logIndex to Infinity so we skip all events from the last processed block
-  // (we don't know which events in that block were already processed before restart)
-  lastProcessedBlock = get_last_processed_block(contract_address);
-  lastProcessedLogIndex = lastProcessedBlock > 0 ? Infinity : -1;
+  // Initialize from file
+  const lastEvent = get_last_processed_event(contract_address);
+  lastProcessedBlock = lastEvent.block;
+  lastProcessedLogIndex = lastEvent.logIndex;
 
   // Get past events to process any missed events
   await get_past_events(contract_instance, contract_address, on_contract_event_callback);
