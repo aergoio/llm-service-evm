@@ -8,6 +8,10 @@ let is_active = true;
 let contract = null;
 let provider = null;
 
+// Track last processed event to avoid duplicates (block + logIndex uniquely identifies an event)
+let lastProcessedBlock = 0;
+let lastProcessedLogIndex = -1;
+
 // Function to get file path for storing the last processed block
 function get_last_processed_block_file_path(contract_address) {
   return path.join(CONFIG_PATH, contract_address.toLowerCase() + '.last-processed-block');
@@ -36,7 +40,8 @@ function write_last_processed_block(contract_address, blockHeight) {
 
 // Retrieve past events from the LLM service contract
 async function get_past_events(contract_instance, contract_address, on_contract_event_callback) {
-  let start_block = get_last_processed_block(contract_address);
+  // Use the already-initialized lastProcessedBlock (set by initialize_event_handling)
+  let start_block = lastProcessedBlock;
   const last_block = await provider.getBlockNumber();
 
   if (start_block == 0) {
@@ -93,6 +98,10 @@ async function get_past_events(contract_instance, contract_address, on_contract_
         // Convert to a format similar to Aergo events for compatibility
         const normalizedEvent = normalizeEvent(event);
         on_contract_event_callback(normalizedEvent, false);
+
+        // Track the last processed event
+        lastProcessedBlock = event.blockNumber;
+        lastProcessedLogIndex = event.logIndex;
       }
 
       if (!is_active) return;
@@ -104,7 +113,13 @@ async function get_past_events(contract_instance, contract_address, on_contract_
     start_block += BLOCK_RANGE;
   }
 
-  // Update the last processed block
+  // Update the last processed block (in memory and file)
+  // If we processed events, lastProcessedBlock is already set to the last event's block
+  // If no events, we still need to update to last_block to mark that range as processed
+  if (lastProcessedBlock < last_block) {
+    lastProcessedBlock = last_block;
+    lastProcessedLogIndex = Infinity;  // No events in this block, skip all from subscription
+  }
   write_last_processed_block(contract_address, last_block);
 }
 
@@ -144,45 +159,82 @@ async function subscribe_to_events(contract_instance, contract_address, on_contr
   contract_instance.on('NewRequest', (requestId, redundancy, event) => {
     if (!is_active) return;
 
+    const blockNumber = event.log.blockNumber;
+    const logIndex = event.log.index;
+
+    // Skip events we've already processed (check both block and log index)
+    if (blockNumber < lastProcessedBlock ||
+        (blockNumber === lastProcessedBlock && logIndex <= lastProcessedLogIndex)) {
+      console.log(`Skipping duplicate event from block ${blockNumber}, logIndex ${logIndex} (already processed up to block ${lastProcessedBlock}, logIndex ${lastProcessedLogIndex})`);
+      return;
+    }
+
     const normalizedEvent = {
       eventName: 'new_request',
       args: [requestId.toString(), Number(redundancy)],
-      blockno: event.log.blockNumber,
+      blockno: blockNumber,
       txHash: event.log.transactionHash
     };
 
     on_contract_event_callback(normalizedEvent, true);
-    write_last_processed_block(contract_address, event.log.blockNumber);
+
+    lastProcessedBlock = blockNumber;
+    lastProcessedLogIndex = logIndex;
+    write_last_processed_block(contract_address, blockNumber);
   });
 
   // Subscribe to NodeAdded events
   contract_instance.on('NodeAdded', (node, event) => {
     if (!is_active) return;
 
+    const blockNumber = event.log.blockNumber;
+    const logIndex = event.log.index;
+
+    // Skip events we've already processed
+    if (blockNumber < lastProcessedBlock ||
+        (blockNumber === lastProcessedBlock && logIndex <= lastProcessedLogIndex)) {
+      return;
+    }
+
     const normalizedEvent = {
       eventName: 'node_added',
       args: [node],
-      blockno: event.log.blockNumber,
+      blockno: blockNumber,
       txHash: event.log.transactionHash
     };
 
     on_contract_event_callback(normalizedEvent, true);
-    write_last_processed_block(contract_address, event.log.blockNumber);
+
+    lastProcessedBlock = blockNumber;
+    lastProcessedLogIndex = logIndex;
+    write_last_processed_block(contract_address, blockNumber);
   });
 
   // Subscribe to NodeRemoved events
   contract_instance.on('NodeRemoved', (node, event) => {
     if (!is_active) return;
 
+    const blockNumber = event.log.blockNumber;
+    const logIndex = event.log.index;
+
+    // Skip events we've already processed
+    if (blockNumber < lastProcessedBlock ||
+        (blockNumber === lastProcessedBlock && logIndex <= lastProcessedLogIndex)) {
+      return;
+    }
+
     const normalizedEvent = {
       eventName: 'node_removed',
       args: [node],
-      blockno: event.log.blockNumber,
+      blockno: blockNumber,
       txHash: event.log.transactionHash
     };
 
     on_contract_event_callback(normalizedEvent, true);
-    write_last_processed_block(contract_address, event.log.blockNumber);
+
+    lastProcessedBlock = blockNumber;
+    lastProcessedLogIndex = logIndex;
+    write_last_processed_block(contract_address, blockNumber);
   });
 }
 
@@ -223,6 +275,12 @@ async function initialize_event_handling(provider_instance, contract_instance, c
     throw new Error('on_contract_event_callback must be a function');
   }
 
+  // Initialize lastProcessedBlock from file
+  // Set logIndex to Infinity so we skip all events from the last processed block
+  // (we don't know which events in that block were already processed before restart)
+  lastProcessedBlock = get_last_processed_block(contract_address);
+  lastProcessedLogIndex = lastProcessedBlock > 0 ? Infinity : -1;
+
   // Get past events to process any missed events
   await get_past_events(contract_instance, contract_address, on_contract_event_callback);
 
@@ -237,4 +295,3 @@ module.exports = {
   initialize_event_handling,
   terminate_event_handling
 };
-
