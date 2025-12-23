@@ -97,9 +97,9 @@ async function get_past_events(contract_instance, contract_address, on_contract_
 
       // Combine and sort all events by block number and log index
       const allEvents = [
-        ...newRequestEvents.map(e => ({ ...e, eventName: 'new_request' })),
-        ...nodeAddedEvents.map(e => ({ ...e, eventName: 'node_added' })),
-        ...nodeRemovedEvents.map(e => ({ ...e, eventName: 'node_removed' }))
+        ...newRequestEvents.map(e => ({ ...e, eventName: 'NewRequest' })),
+        ...nodeAddedEvents.map(e => ({ ...e, eventName: 'NodeAdded' })),
+        ...nodeRemovedEvents.map(e => ({ ...e, eventName: 'NodeRemoved' }))
       ].sort((a, b) => {
         if (a.blockNumber !== b.blockNumber) {
           return a.blockNumber - b.blockNumber;
@@ -111,9 +111,7 @@ async function get_past_events(contract_instance, contract_address, on_contract_
       for (const event of allEvents) {
         if (!is_active) return;
 
-        // Convert to a format similar to Aergo events for compatibility
-        const normalizedEvent = normalizeEvent(event);
-        on_contract_event_callback(normalizedEvent, false);
+        on_contract_event_callback(event, false);
 
         // Track the last processed event
         lastProcessedBlock = event.blockNumber;
@@ -139,118 +137,48 @@ async function get_past_events(contract_instance, contract_address, on_contract_
   write_last_processed_event(contract_address, lastProcessedBlock, lastProcessedLogIndex);
 }
 
-// Normalize EVM event to match the expected format
-function normalizeEvent(event) {
-  let args = [];
+// Handle a subscription event (common logic for all event types)
+function handle_subscription_event(eventName, args, event, contract_address, on_contract_event_callback) {
+  if (!is_active) return;
 
-  if (event.eventName === 'new_request') {
-    // NewRequest(uint256 indexed requestId, uint8 redundancy)
-    args = [
-      event.args.requestId.toString(),  // Convert BigInt to string
-      Number(event.args.redundancy)
-    ];
-  } else if (event.eventName === 'node_added') {
-    // NodeAdded(address indexed node)
-    args = [event.args.node];
-  } else if (event.eventName === 'node_removed') {
-    // NodeRemoved(address indexed node)
-    args = [event.args.node];
+  const blockNumber = event.log.blockNumber;
+  const logIndex = event.log.index;
+
+  // Skip events we've already processed (check both block and log index)
+  if (blockNumber < lastProcessedBlock ||
+      (blockNumber === lastProcessedBlock && logIndex <= lastProcessedLogIndex)) {
+    console.log(`Skipping duplicate event from block ${blockNumber}, logIndex ${logIndex} (already processed up to block ${lastProcessedBlock}, logIndex ${lastProcessedLogIndex})`);
+    return;
   }
 
-  return {
-    eventName: event.eventName,
-    args: args,
-    blockno: event.blockNumber,
-    txIndex: event.transactionIndex,
-    logIndex: event.logIndex,
-    txHash: event.transactionHash
+  const eventObj = {
+    eventName,
+    args,
+    blockNumber,
+    txHash: event.log.transactionHash
   };
+
+  on_contract_event_callback(eventObj, true);
+
+  lastProcessedBlock = blockNumber;
+  lastProcessedLogIndex = logIndex;
+  write_last_processed_event(contract_address, blockNumber, logIndex);
 }
 
 // Subscribe to new events from the LLM service contract
 async function subscribe_to_events(contract_instance, contract_address, on_contract_event_callback) {
   console.log("Subscribing to new events from contract", contract_address, "...");
 
-  // Subscribe to NewRequest events
   contract_instance.on('NewRequest', (requestId, redundancy, event) => {
-    if (!is_active) return;
-
-    const blockNumber = event.log.blockNumber;
-    const logIndex = event.log.index;
-
-    // Skip events we've already processed (check both block and log index)
-    if (blockNumber < lastProcessedBlock ||
-        (blockNumber === lastProcessedBlock && logIndex <= lastProcessedLogIndex)) {
-      console.log(`Skipping duplicate event from block ${blockNumber}, logIndex ${logIndex} (already processed up to block ${lastProcessedBlock}, logIndex ${lastProcessedLogIndex})`);
-      return;
-    }
-
-    const normalizedEvent = {
-      eventName: 'new_request',
-      args: [requestId.toString(), Number(redundancy)],
-      blockno: blockNumber,
-      txHash: event.log.transactionHash
-    };
-
-    on_contract_event_callback(normalizedEvent, true);
-
-    lastProcessedBlock = blockNumber;
-    lastProcessedLogIndex = logIndex;
-    write_last_processed_event(contract_address, blockNumber, logIndex);
+    handle_subscription_event('NewRequest', { requestId, redundancy }, event, contract_address, on_contract_event_callback);
   });
 
-  // Subscribe to NodeAdded events
   contract_instance.on('NodeAdded', (node, event) => {
-    if (!is_active) return;
-
-    const blockNumber = event.log.blockNumber;
-    const logIndex = event.log.index;
-
-    // Skip events we've already processed
-    if (blockNumber < lastProcessedBlock ||
-        (blockNumber === lastProcessedBlock && logIndex <= lastProcessedLogIndex)) {
-      return;
-    }
-
-    const normalizedEvent = {
-      eventName: 'node_added',
-      args: [node],
-      blockno: blockNumber,
-      txHash: event.log.transactionHash
-    };
-
-    on_contract_event_callback(normalizedEvent, true);
-
-    lastProcessedBlock = blockNumber;
-    lastProcessedLogIndex = logIndex;
-    write_last_processed_event(contract_address, blockNumber, logIndex);
+    handle_subscription_event('NodeAdded', { node }, event, contract_address, on_contract_event_callback);
   });
 
-  // Subscribe to NodeRemoved events
   contract_instance.on('NodeRemoved', (node, event) => {
-    if (!is_active) return;
-
-    const blockNumber = event.log.blockNumber;
-    const logIndex = event.log.index;
-
-    // Skip events we've already processed
-    if (blockNumber < lastProcessedBlock ||
-        (blockNumber === lastProcessedBlock && logIndex <= lastProcessedLogIndex)) {
-      return;
-    }
-
-    const normalizedEvent = {
-      eventName: 'node_removed',
-      args: [node],
-      blockno: blockNumber,
-      txHash: event.log.transactionHash
-    };
-
-    on_contract_event_callback(normalizedEvent, true);
-
-    lastProcessedBlock = blockNumber;
-    lastProcessedLogIndex = logIndex;
-    write_last_processed_event(contract_address, blockNumber, logIndex);
+    handle_subscription_event('NodeRemoved', { node }, event, contract_address, on_contract_event_callback);
   });
 }
 

@@ -400,8 +400,8 @@ async function on_llm_request(event, is_new) {
       return;
     }
 
-    const request_id = event.args[0];
-    const redundancy = event.args[1] || 1;
+    const request_id = event.args.requestId;
+    const redundancy = event.args.redundancy || 1;
     console.log(`Received new LLM request with ID: ${request_id}, redundancy: ${redundancy}`);
 
     // Calculate wait time based on round-robin position
@@ -524,7 +524,7 @@ async function on_llm_request(event, is_new) {
   }
 }
 
-// Handle node_added and node_removed events to update state
+// Handle NodeAdded and NodeRemoved events to update state
 async function on_node_list_changed(event) {
   console.log(`Node list changed (${event.eventName}), refreshing...`);
   await fetch_node_index();
@@ -534,9 +534,9 @@ async function on_node_list_changed(event) {
 function on_contract_event(event, is_new) {
   console.log("Received contract event:", event.eventName);
 
-  if (event.eventName === "new_request") {
+  if (event.eventName === "NewRequest") {
     on_llm_request(event, is_new);
-  } else if (event.eventName === "node_added" || event.eventName === "node_removed") {
+  } else if (event.eventName === "NodeAdded" || event.eventName === "NodeRemoved") {
     on_node_list_changed(event);
   }
 }
@@ -599,7 +599,7 @@ async function initialize() {
     // Fetch this node's index from the contract (may not be authorized yet)
     await fetch_node_index();
 
-    // Initialize contract event handling (listens for new_request, node_added, node_removed)
+    // Initialize contract event handling (listens for NewRequest, NodeAdded, NodeRemoved)
     await initialize_event_handling(provider, contract, contract_address, on_contract_event);
 
     console.log("LLM service initialized and listening for events");
