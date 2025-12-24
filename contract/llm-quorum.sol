@@ -422,6 +422,51 @@ contract LLMQuorum {
 }
 
 // ============================================================
+//                    LLM QUORUM INTERFACE
+// ============================================================
+
+/**
+ * @title ILLMQuorum
+ * @notice Interface for interacting with the LLMQuorum contract
+ */
+interface ILLMQuorum {
+    struct ModelInfo {
+        bytes32 platform;
+        bytes32 model;
+    }
+
+    struct QuorumRequest {
+        address caller;
+        string callback;
+        bytes args;
+        uint8 quorumThreshold;
+        uint8 resultsReceived;
+        bool storeResultOffchain;
+    }
+
+    function getPrice(
+        ModelInfo[] calldata models,
+        uint8 redundancy
+    ) external view returns (uint256 totalPrice);
+
+    function newRequest(
+        bytes32 prompt,
+        string calldata input,
+        ModelInfo[] calldata models,
+        uint8 quorumThreshold,
+        uint8 redundancy,
+        bool returnContentWithinResultTag,
+        bool storeResultOffchain,
+        string calldata callback,
+        bytes calldata args
+    ) external payable returns (uint256 requestId);
+
+    function getRequestInfo(uint256 requestId) external view returns (QuorumRequest memory);
+
+    function getRequestResults(uint256 requestId) external view returns (string[] memory resultList);
+}
+
+// ============================================================
 //                    CALLBACK INTERFACE
 // ============================================================
 
