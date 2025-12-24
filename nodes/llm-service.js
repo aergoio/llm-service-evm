@@ -468,21 +468,19 @@ async function on_llm_request(event, is_new) {
 
     console.log("Retrieved config:", { platform: config.platform, model: config.model, promptLength: config.prompt.length });
 
-    // Get platform and model from config, or fall back to request_info
-    let platform = config.platform;
-    let model = config.model;
+    // Get platform and model from request_info first, fall back to config if not specified
+    let platform = platform_from_request || config.platform;
+    let model = model_from_request || config.model;
 
     if (!platform || !model) {
-      // Try to get from request_info
-      platform = platform || platform_from_request;
-      model = model || model_from_request;
+      console.error(`Invalid config: missing platform or model in both request_info and config`);
+      return;
+    }
 
-      if (!platform || !model) {
-        console.error(`Invalid config: missing platform or model in both config and request_info`);
-        return;
-      }
-
-      console.log("Using platform/model from request_info:", { platform, model });
+    if (platform_from_request && model_from_request) {
+      console.log("Using platform/model from request:", { platform, model });
+    } else {
+      console.log("Using platform/model from prompt config:", { platform, model });
     }
 
     // Build the prompt from config and resolve input hashes
