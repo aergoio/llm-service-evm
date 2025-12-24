@@ -135,7 +135,7 @@ contract LLMQuorumTest is ILLMQuorumCallback {
         });
         models[2] = LLMQuorum.ModelInfo({
           platform: bytes32("anthropic"),
-          model: bytes32("claude-sonnet-4.5")
+          model: bytes32("claude-sonnet-4-5-20250929")
         });
 
         // Call the LLM Quorum service
