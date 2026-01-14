@@ -54,7 +54,7 @@ function write_last_processed_event(contract_address, block, logIndex) {
   }
 }
 
-// Retrieve past events from the LLM service contract
+// Retrieve past events from the contract
 async function get_past_events(contract_instance, contract_address, on_contract_event_callback) {
   // Use the already-initialized lastProcessedBlock (set by initialize_event_handling)
   let start_block = lastProcessedBlock;
@@ -76,31 +76,11 @@ async function get_past_events(contract_instance, contract_address, on_contract_
     console.log("Fetching events from block", start_block, "to block", end_block);
 
     try {
-      // Query all relevant events in this block range
-      const newRequestEvents = await contract_instance.queryFilter(
-        contract_instance.filters.NewRequest(),
-        start_block,
-        end_block
-      );
+      // Query all events at once using wildcard
+      const events = await contract_instance.queryFilter('*', start_block, end_block);
 
-      const nodeAddedEvents = await contract_instance.queryFilter(
-        contract_instance.filters.NodeAdded(),
-        start_block,
-        end_block
-      );
-
-      const nodeRemovedEvents = await contract_instance.queryFilter(
-        contract_instance.filters.NodeRemoved(),
-        start_block,
-        end_block
-      );
-
-      // Combine and sort all events by block number and log index
-      const allEvents = [
-        ...newRequestEvents.map(e => ({ ...e, eventName: 'NewRequest' })),
-        ...nodeAddedEvents.map(e => ({ ...e, eventName: 'NodeAdded' })),
-        ...nodeRemovedEvents.map(e => ({ ...e, eventName: 'NodeRemoved' }))
-      ].sort((a, b) => {
+      // Sort all events by block number and log index
+      const allEvents = events.sort((a, b) => {
         if (a.blockNumber !== b.blockNumber) {
           return a.blockNumber - b.blockNumber;
         }
@@ -165,20 +145,15 @@ function handle_subscription_event(eventName, args, event, contract_address, on_
   write_last_processed_event(contract_address, blockNumber, logIndex);
 }
 
-// Subscribe to new events from the LLM service contract
+// Subscribe to new events from the contract
 async function subscribe_to_events(contract_instance, contract_address, on_contract_event_callback) {
   console.log("Subscribing to new events from contract", contract_address, "...");
 
-  contract_instance.on('NewRequest', (requestId, redundancy, event) => {
-    handle_subscription_event('NewRequest', { requestId, redundancy }, event, contract_address, on_contract_event_callback);
-  });
-
-  contract_instance.on('NodeAdded', (node, event) => {
-    handle_subscription_event('NodeAdded', { node }, event, contract_address, on_contract_event_callback);
-  });
-
-  contract_instance.on('NodeRemoved', (node, event) => {
-    handle_subscription_event('NodeRemoved', { node }, event, contract_address, on_contract_event_callback);
+  // Use wildcard '*' to listen to all events
+  contract_instance.on('*', (event) => {
+    const eventName = event.eventName;
+    const args = event.args.toObject();
+    handle_subscription_event(eventName, args, event, contract_address, on_contract_event_callback);
   });
 }
 
