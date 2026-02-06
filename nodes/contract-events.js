@@ -54,15 +54,42 @@ function write_last_processed_event(contract_address, block, logIndex) {
   }
 }
 
+// Find the block at which a contract was deployed using binary search on eth_getCode
+async function find_contract_deployment_block(contract_address) {
+  let low = 0;
+  let high = await provider.getBlockNumber();
+
+  // Verify the contract exists at the current block
+  const code = await provider.getCode(contract_address, high);
+  if (code === '0x') {
+    console.log(`No contract found at ${contract_address}`);
+    return 0;
+  }
+
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    const code = await provider.getCode(contract_address, mid);
+    if (code === '0x') {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+
+  console.log(`Contract ${contract_address.slice(0,10)}... deployed at block ${low}`);
+  return low;
+}
+
 // Retrieve past events from the contract (for catching up on missed events)
 async function get_past_events(contract_instance, contract_address, on_contract_event_callback) {
   // Use the already-initialized lastProcessedBlock (set by initialize_event_handling)
   let start_block = lastProcessedBlock;
   const last_block = await provider.getBlockNumber();
 
-  // If we've never processed events before, start from block 1 (skip genesis)
+  // If we've never processed events before, start from the contract's deployment block
   if (start_block === 0) {
-    start_block = 1;
+    start_block = await find_contract_deployment_block(contract_address);
+    if (start_block === 0) return;
   }
 
   // Don't query if we're already at the latest block
