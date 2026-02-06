@@ -54,13 +54,20 @@ function write_last_processed_event(contract_address, block, logIndex) {
   }
 }
 
-// Retrieve past events from the contract
+// Retrieve past events from the contract (for catching up on missed events)
 async function get_past_events(contract_instance, contract_address, on_contract_event_callback) {
   // Use the already-initialized lastProcessedBlock (set by initialize_event_handling)
   let start_block = lastProcessedBlock;
   const last_block = await provider.getBlockNumber();
 
-  if (start_block == 0) {
+  // If we've never processed events before, start from block 1 (skip genesis)
+  if (start_block === 0) {
+    start_block = 1;
+  }
+
+  // Don't query if we're already at the latest block
+  if (start_block > last_block) {
+    console.log(`Contract ${contract_address.slice(0,10)}... already up to date at block ${start_block}`);
     return;
   }
 
@@ -69,8 +76,8 @@ async function get_past_events(contract_instance, contract_address, on_contract_
   // EVM has limits on how many blocks we can query at once (typically 10000)
   const BLOCK_RANGE = 10000;
 
-  while (start_block < last_block) {
-    let end_block = start_block + BLOCK_RANGE;
+  while (start_block <= last_block) {
+    let end_block = start_block + BLOCK_RANGE - 1;
     if (end_block > last_block) end_block = last_block;
 
     console.log("Fetching events from block", start_block, "to block", end_block);
@@ -79,23 +86,31 @@ async function get_past_events(contract_instance, contract_address, on_contract_
       // Query all events at once using wildcard
       const events = await contract_instance.queryFilter('*', start_block, end_block);
 
-      // Sort all events by block number and log index
-      const allEvents = events.sort((a, b) => {
-        if (a.blockNumber !== b.blockNumber) {
-          return a.blockNumber - b.blockNumber;
+      if (events.length > 0) {
+        // Sort all events by block number and log index
+        const allEvents = events.sort((a, b) => {
+          if (a.blockNumber !== b.blockNumber) {
+            return a.blockNumber - b.blockNumber;
+          }
+          return a.logIndex - b.logIndex;
+        });
+
+        // Process each event
+        for (const event of allEvents) {
+          if (!is_active) return;
+
+          // Skip events we've already processed
+          if (event.blockNumber < lastProcessedBlock ||
+              (event.blockNumber === lastProcessedBlock && event.logIndex <= lastProcessedLogIndex)) {
+            continue;
+          }
+
+          on_contract_event_callback(event, false);
+
+          // Track the last processed event
+          lastProcessedBlock = event.blockNumber;
+          lastProcessedLogIndex = event.logIndex;
         }
-        return a.logIndex - b.logIndex;
-      });
-
-      // Process each event
-      for (const event of allEvents) {
-        if (!is_active) return;
-
-        on_contract_event_callback(event, false);
-
-        // Track the last processed event
-        lastProcessedBlock = event.blockNumber;
-        lastProcessedLogIndex = event.logIndex;
       }
 
       if (!is_active) return;
@@ -104,7 +119,7 @@ async function get_past_events(contract_instance, contract_address, on_contract_
       console.error('Error fetching events from block range:', start_block, 'to', end_block, err);
     }
 
-    start_block += BLOCK_RANGE;
+    start_block = end_block + 1;
   }
 
   // Update the last processed event (in memory and file)
@@ -117,28 +132,22 @@ async function get_past_events(contract_instance, contract_address, on_contract_
   write_last_processed_event(contract_address, lastProcessedBlock, lastProcessedLogIndex);
 }
 
-// Handle a subscription event (common logic for all event types)
-function handle_subscription_event(eventName, args, event, contract_address, on_contract_event_callback) {
+// Handle a decoded subscription event
+function handle_subscription_event(decodedEvent, contract_address, on_contract_event_callback) {
   if (!is_active) return;
+  if (!decodedEvent) return;
 
-  const blockNumber = event.log.blockNumber;
-  const logIndex = event.log.index;
+  const blockNumber = decodedEvent.blockNumber;
+  const logIndex = decodedEvent.index ?? 0;
 
   // Skip events we've already processed (check both block and log index)
   if (blockNumber < lastProcessedBlock ||
       (blockNumber === lastProcessedBlock && logIndex <= lastProcessedLogIndex)) {
-    console.log(`Skipping duplicate event from block ${blockNumber}, logIndex ${logIndex} (already processed up to block ${lastProcessedBlock}, logIndex ${lastProcessedLogIndex})`);
     return;
   }
 
-  const eventObj = {
-    eventName,
-    args,
-    blockNumber,
-    txHash: event.log.transactionHash
-  };
-
-  on_contract_event_callback(eventObj, true);
+  // Pass to the main event handler
+  on_contract_event_callback(decodedEvent, true);
 
   lastProcessedBlock = blockNumber;
   lastProcessedLogIndex = logIndex;
@@ -147,14 +156,45 @@ function handle_subscription_event(eventName, args, event, contract_address, on_
 
 // Subscribe to new events from the contract
 async function subscribe_to_events(contract_instance, contract_address, on_contract_event_callback) {
-  console.log("Subscribing to new events from contract", contract_address, "...");
+  console.log("Subscribing to events from contract", contract_address, "...");
 
-  // Use wildcard '*' to listen to all events
-  contract_instance.on('*', (event) => {
-    const eventName = event.eventName;
-    const args = event.args.toObject();
-    handle_subscription_event(eventName, args, event, contract_address, on_contract_event_callback);
+  // Get the contract address we're subscribing to
+  const targetAddress = await contract_instance.getAddress();
+
+  // Use wildcard to listen to all events from this contract
+  contract_instance.on("*", (event) => {
+    const rawLog = event.log;
+    if (!rawLog) return;
+
+    // Filter - only process events from our contract
+    if (rawLog.address.toLowerCase() !== targetAddress.toLowerCase()) {
+      return;
+    }
+
+    // Decode the log using the contract's interface
+    try {
+      const parsed = contract_instance.interface.parseLog({
+        topics: rawLog.topics,
+        data: rawLog.data
+      });
+
+      if (parsed) {
+        const decodedEvent = {
+          eventName: parsed.name,
+          args: parsed.args,
+          blockNumber: rawLog.blockNumber,
+          index: rawLog.index,
+          transactionHash: rawLog.transactionHash
+        };
+
+        handle_subscription_event(decodedEvent, contract_address, on_contract_event_callback);
+      }
+    } catch (err) {
+      // Silently ignore parse errors - event might be from an inherited contract
+    }
   });
+
+  console.log("Subscribed to all events for contract", contract_address);
 }
 
 // Update block height periodically
@@ -163,9 +203,12 @@ async function update_block_height(contract_address) {
     const blockNumber = await provider.getBlockNumber();
     console.log("Current block:", blockNumber);
     // Update to current block with Infinity logIndex (no events to process)
-    lastProcessedBlock = blockNumber;
-    lastProcessedLogIndex = Infinity;
-    write_last_processed_event(contract_address, blockNumber, Infinity);
+    // Only update if we haven't processed a more recent event in the meantime
+    if (lastProcessedBlock < blockNumber) {
+      lastProcessedBlock = blockNumber;
+      lastProcessedLogIndex = Infinity;
+      write_last_processed_event(contract_address, blockNumber, Infinity);
+    }
   } catch (err) {
     console.error('Error updating block height:', err);
   }
@@ -197,10 +240,23 @@ async function initialize_event_handling(provider_instance, contract_instance, c
     throw new Error('on_contract_event_callback must be a function');
   }
 
+  // Debug: Check provider type
+  const providerType = provider_instance.constructor.name;
+  console.log(`Provider type: ${providerType}`);
+
+  // Wait for provider to be ready (important for WebSocket)
+  try {
+    await provider_instance.ready;
+    console.log("Provider is ready");
+  } catch (e) {
+    // Some providers don't have ready, that's OK
+  }
+
   // Initialize from file
   const lastEvent = get_last_processed_event(contract_address);
   lastProcessedBlock = lastEvent.block;
   lastProcessedLogIndex = lastEvent.logIndex;
+  console.log(`Initialized contract ${contract_address.slice(0,10)}... from block ${lastProcessedBlock}`);
 
   // Get past events to process any missed events
   await get_past_events(contract_instance, contract_address, on_contract_event_callback);
