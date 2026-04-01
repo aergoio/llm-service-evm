@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HPP AI Service — On-chain AI for Smart Contracts</title>
+  <meta name="description" content="Give your smart contracts the power of AI. Connect any EVM contract to OpenAI, Anthropic, Gemini, and more through a decentralized oracle network on the HPP blockchain.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="3" y="3" width="22" height="22" rx="6" stroke="currentColor" stroke-width="2"/>
+            <path d="M9 14h10M14 9v10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="9" cy="9" r="1.5" fill="currentColor"/>
+            <circle cx="19" cy="19" r="1.5" fill="currentColor"/>
+            <circle cx="19" cy="9" r="1.5" fill="currentColor"/>
+            <circle cx="9" cy="19" r="1.5" fill="currentColor"/>
+          </svg>
+        </div>
+        <span>AI Service</span>
+      </div>
+      <nav class="nav" id="mainNav">
+        <a href="#how-it-works" class="nav-link">How It Works</a>
+        <a href="#platforms" class="nav-link">Platforms</a>
+        <a href="#integrate" class="nav-link">Integrate</a>
+        <a href="#nodes" class="nav-link">Run a Node</a>
+        <a href="https://github.com/aergoio/llm-service-evm" target="_blank" rel="noopener" class="btn btn-outline">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.17 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C19.138 20.167 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+          GitHub
+        </a>
+      </nav>
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Hero ────────────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="hero-bg">
+      <div class="hero-grid"></div>
+      <div class="hero-glow hero-glow--1"></div>
+      <div class="hero-glow hero-glow--2"></div>
+    </div>
+    <div class="container">
+      <div class="hero-badge">
+        <span class="badge-dot"></span>
+        Now live on HPP Network
+      </div>
+      <h1 class="hero-title">
+        AI completions,<br><span class="gradient-text">natively on-chain</span>
+      </h1>
+      <p class="hero-sub">
+        Give your smart contracts the power of AI. Connect any EVM contract to GPT, Claude, Gemini, and more — text, images, audio and beyond — through a decentralized oracle network.
+      </p>
+      <div class="hero-actions">
+        <a href="#integrate" class="btn btn-primary btn-lg">Start Building</a>
+        <a href="https://github.com/aergoio/llm-service-evm" target="_blank" rel="noopener" class="btn btn-ghost btn-lg">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.17 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C19.138 20.167 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+
+      <!-- Floating provider pills -->
+      <div class="hero-pills" aria-hidden="true">
+        <div class="pills-row pills-row--1">
+          <span class="pill">GPT-4o</span>
+          <span class="pill pill--active">Claude Sonnet</span>
+          <span class="pill">Gemini 2.0</span>
+          <span class="pill">Grok</span>
+          <span class="pill">DeepSeek</span>
+        </div>
+        <div class="pills-row pills-row--2">
+          <span class="pill">Perplexity</span>
+          <span class="pill pill--active">Qwen</span>
+          <span class="pill">Kimi</span>
+          <span class="pill">Groq</span>
+          <span class="pill">GLM</span>
+          <span class="pill pill--active">GPT-5</span>
+        </div>
+      </div>
+
+      <div class="hero-stats">
+        <div class="stat">
+          <span class="stat-value">10+</span>
+          <span class="stat-label">AI Platforms</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-value">8+</span>
+          <span class="stat-label">Networks</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-value">Quorum</span>
+          <span class="stat-label">Result Consensus</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-value">Async</span>
+          <span class="stat-label">Callback Pattern</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── How It Works ─────────────────────────────────────────── -->
+  <section class="section" id="how-it-works">
+    <div class="container">
+      <div class="section-header">
+        <p class="section-tag">The Protocol</p>
+        <h2 class="section-title">How It Works</h2>
+        <p class="section-sub">A fully on-chain oracle pattern. Your contract sends a request, authorized nodes race to fulfill it, and the result is delivered back via callback.</p>
+      </div>
+
+      <div class="flow">
+        <div class="flow-step">
+          <div class="flow-step-icon flow-step-icon--1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="12" y1="18" x2="12" y2="12"/>
+              <line x1="9" y1="15" x2="15" y2="15"/>
+            </svg>
+          </div>
+          <div class="flow-step-num">01</div>
+          <h3>Contract sends request</h3>
+          <p>Your contract calls <code>newRequest()</code> with a prompt config hash, JSON input, and the name of the callback function to invoke when done.</p>
+          <div class="flow-step-tag">On-chain</div>
+        </div>
+
+        <div class="flow-connector">
+          <svg viewBox="0 0 80 24" fill="none" class="connector-arrow">
+            <path d="M4 12h64" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <path d="M60 6l10 6-10 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <svg viewBox="0 0 24 80" fill="none" class="connector-arrow connector-arrow--vert">
+            <path d="M12 4v64" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <path d="M6 60l6 10 6-10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+
+        <div class="flow-step">
+          <div class="flow-step-icon flow-step-icon--2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <ellipse cx="12" cy="5" rx="9" ry="3"/>
+              <path d="M21 12c0 1.66-4.03 3-9 3S3 13.66 3 12"/>
+              <path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/>
+            </svg>
+          </div>
+          <div class="flow-step-num">02</div>
+          <h3>Nodes process with AI</h3>
+          <p>Authorized off-chain nodes detect the <code>NewRequest</code> event, fetch the prompt config, inject your JSON inputs, and call the AI provider API.</p>
+          <div class="flow-step-tag">Off-chain</div>
+        </div>
+
+        <div class="flow-connector">
+          <svg viewBox="0 0 80 24" fill="none" class="connector-arrow">
+            <path d="M4 12h64" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <path d="M60 6l10 6-10 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <svg viewBox="0 0 24 80" fill="none" class="connector-arrow connector-arrow--vert">
+            <path d="M12 4v64" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <path d="M6 60l6 10 6-10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+
+        <div class="flow-step">
+          <div class="flow-step-icon flow-step-icon--3">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+          </div>
+          <div class="flow-step-num">03</div>
+          <h3>Result delivered via callback</h3>
+          <p>Once the required number of nodes agree (quorum), the contract triggers your callback function with the AI-generated result — fully on-chain.</p>
+          <div class="flow-step-tag">On-chain</div>
+        </div>
+      </div>
+
+      <!-- Redundancy callout -->
+      <div class="callout">
+        <div class="callout-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+        </div>
+        <div>
+          <strong>Quorum-based redundancy.</strong> Set <code>redundancy &gt; 1</code> to require multiple independent nodes to return the same result before your callback fires. Eliminate unreliable nodes without changing your contract.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Platforms ─────────────────────────────────────────────── -->
+  <section class="section section-alt" id="platforms">
+    <div class="container">
+      <div class="section-header">
+        <p class="section-tag">AI Providers</p>
+        <h2 class="section-title">Every major AI platform</h2>
+        <p class="section-sub">Don't get locked into one provider. Specify the platform and model in your prompt config and switch at any time — your contract stays the same.</p>
+      </div>
+
+      <div class="platforms">
+        <div class="platform-card">
+          <div class="platform-logo platform-logo--openai">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>
+          </div>
+          <div class="platform-info">
+            <h4>OpenAI</h4>
+            <p>GPT-4o, GPT-5, o3</p>
+          </div>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-logo platform-logo--anthropic">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.304 3.541L23 20.459h-3.958l-1.19-3.724H9.948l-1.19 3.724H4.8L10.496 3.54h6.808zm-2.19 10.018L13.1 7.197h-.201l-2.014 6.362h4.228z"/></svg>
+          </div>
+          <div class="platform-info">
+            <h4>Anthropic</h4>
+            <p>Claude Sonnet, Haiku, Opus</p>
+          </div>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-logo platform-logo--google">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.787 10.958l-.04-.2c-.36-1.817-1.994-3.183-3.944-3.183-2.208 0-4 1.792-4 4s1.792 4 4 4c1.615 0 3.009-.963 3.679-2.344h-3.68v-2.273h6.208z"/><path d="M11.803 2C6.38 2 2 6.38 2 11.803c0 5.422 4.38 9.803 9.803 9.803 5.422 0 9.803-4.381 9.803-9.803C21.606 6.38 17.225 2 11.803 2zm0 1.5c4.58 0 8.303 3.723 8.303 8.303 0 4.58-3.722 8.303-8.303 8.303-4.58 0-8.303-3.723-8.303-8.303 0-4.58 3.722-8.303 8.303-8.303z"/></svg>
+          </div>
+          <div class="platform-info">
+            <h4>Google</h4>
+            <p>Gemini 2.0, Flash, Pro</p>
+          </div>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-logo platform-logo--xai">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+          </div>
+          <div class="platform-info">
+            <h4>xAI</h4>
+            <p>Grok-2, Grok-3</p>
+          </div>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-logo platform-logo--deepseek">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12s1-3 4-3 4 3 4 3-1 3-4 3-4-3-4-3"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/></svg>
+          </div>
+          <div class="platform-info">
+            <h4>DeepSeek</h4>
+            <p>V3, R2</p>
+          </div>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-logo platform-logo--groq">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/><line x1="12" y1="2" x2="12" y2="22"/><path d="M2 8.5l10 6.5 10-6.5"/></svg>
+          </div>
+          <div class="platform-info">
+            <h4>Groq</h4>
+            <p>Ultra-fast inference</p>
+          </div>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-logo platform-logo--alibaba">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 12h8M12 8v8"/></svg>
+          </div>
+          <div class="platform-info">
+            <h4>Alibaba</h4>
+            <p>Qwen series</p>
+          </div>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-logo platform-logo--moonshot">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </div>
+          <div class="platform-info">
+            <h4>Moonshot</h4>
+            <p>Kimi models</p>
+          </div>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-logo platform-logo--zhipu">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>
+          </div>
+          <div class="platform-info">
+            <h4>Zhipu</h4>
+            <p>GLM series</p>
+          </div>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-logo platform-logo--perplexity">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+          </div>
+          <div class="platform-info">
+            <h4>Perplexity</h4>
+            <p>Sonar models</p>
+          </div>
+        </div>
+      </div>
+
+      <p class="platforms-note">Platform and model are specified in the prompt config — switch providers without redeploying your contract.</p>
+    </div>
+  </section>
+
+  <!-- ── Features ─────────────────────────────────────────────── -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header">
+        <p class="section-tag">Why HPP AI Service</p>
+        <h2 class="section-title">Everything your contract needs</h2>
+      </div>
+
+      <div class="features">
+        <div class="feature-card">
+          <div class="feature-icon feature-icon--purple">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <h3>Quorum Consensus</h3>
+          <p>Set <code>redundancy</code> to require N independent nodes to return identical results. Unreliable or colluding nodes can't corrupt your callback.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon feature-icon--blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="7.5 4.21 12 6.81 16.5 4.21"/><polyline points="7.5 19.79 7.5 14.6 3 12"/><polyline points="21 12 16.5 14.6 16.5 19.79"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          </div>
+          <h3>Off-chain Prompt Storage</h3>
+          <p>Store your prompt config off-chain and reference it by SHA256 hash. Update prompts without redeploying — and keep sensitive instructions private.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon feature-icon--green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <h3>Dynamic JSON Inputs</h3>
+          <p>Pass any runtime data as a JSON string. Use <code>{"{{"}key{{"}}"}}</code> placeholders in your prompt template that get substituted per-request — perfect for user-driven AI interactions.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon feature-icon--orange">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <h3>Async Callback Pattern</h3>
+          <p>No polling. Your contract receives results asynchronously via a named callback function. Design around events naturally, just like how HTTP webhooks work.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon feature-icon--cyan">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <h3>Result Tag Extraction</h3>
+          <p>Enable <code>returnContentWithinResultTag</code> to let nodes automatically extract only the content inside <code>&lt;result&gt;</code> tags — keeping AI responses structured and predictable.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon feature-icon--pink">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4.03 3-9 3S3 13.66 3 12"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/></svg>
+          </div>
+          <h3>Off-chain Result Storage</h3>
+          <p>For large responses, enable <code>storeResultOffchain</code> — nodes store the output and return only the hash on-chain. Your contract gets a verifiable reference, not a gas-heavy string.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Integrate ─────────────────────────────────────────────── -->
+  <section class="section section-alt" id="integrate">
+    <div class="container">
+      <div class="section-header">
+        <p class="section-tag">Integration</p>
+        <h2 class="section-title">Three steps to AI-powered contracts</h2>
+        <p class="section-sub">Implement the callback interface, send a request with your prompt config hash, and handle the result — that's it.</p>
+      </div>
+
+      <div class="integrate-layout">
+        <div class="integrate-steps">
+          <div class="integrate-step active" data-step="1">
+            <div class="integrate-step-head">
+              <div class="integrate-num">1</div>
+              <div>
+                <h4>Implement the callback interface</h4>
+                <p>Inherit <code>ILLMServiceCallback</code> and declare your handler function.</p>
+              </div>
+            </div>
+          </div>
+          <div class="integrate-step" data-step="2">
+            <div class="integrate-step-head">
+              <div class="integrate-num">2</div>
+              <div>
+                <h4>Send an AI request</h4>
+                <p>Call <code>newRequest()</code> with your config hash, JSON inputs, and callback name.</p>
+              </div>
+            </div>
+          </div>
+          <div class="integrate-step" data-step="3">
+            <div class="integrate-step-head">
+              <div class="integrate-num">3</div>
+              <div>
+                <h4>Handle the result</h4>
+                <p>Receive the AI-generated result string inside your callback and act on it.</p>
+              </div>
+            </div>
+          </div>
+          <div class="integrate-step" data-step="4">
+            <div class="integrate-step-head">
+              <div class="integrate-num">4</div>
+              <div>
+                <h4>Prompt config format</h4>
+                <p>Store your prompt off-chain. First line sets the model; use <code>{"{{key}}"}}</code> for runtime values.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="code-window">
+          <div class="code-window-bar">
+            <div class="code-dots"><span></span><span></span><span></span></div>
+            <span class="code-filename" id="codeFilename">MyContract.sol</span>
+          </div>
+          <pre class="code-block"><code id="codeContent">import "./llm-service.sol";
+
+contract MyContract is ILLMServiceCallback {
+    ILLMService public aiService;
+
+    constructor(address _aiService) {
+        aiService = ILLMService(_aiService);
+    }
+}</code></pre>
+        </div>
+      </div>
+
+      <!-- Interface box -->
+      <div class="interface-box">
+        <div class="interface-box-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          Contract Interface
+        </div>
+        <pre class="code-block code-block--sm"><code><span class="kw">interface</span> ILLMService {
+    <span class="kw">function</span> <span class="fn">newRequest</span>(
+        <span class="ty">bytes32</span> platform,           <span class="cm">// AI platform ("openai", "anthropic", …)</span>
+        <span class="ty">bytes32</span> model,              <span class="cm">// Model identifier (or use config)</span>
+        <span class="ty">bytes32</span> configHash,         <span class="cm">// SHA256 of off-chain prompt config</span>
+        <span class="ty">string</span>  input,              <span class="cm">// JSON string with runtime values</span>
+        <span class="ty">uint8</span>   redundancy,         <span class="cm">// Nodes that must agree (quorum)</span>
+        <span class="ty">bool</span>    extractResultTag,    <span class="cm">// Extract content from &lt;result&gt; tags</span>
+        <span class="ty">bool</span>    storeResultOffchain, <span class="cm">// Store large responses off-chain</span>
+        <span class="ty">string</span>  callbackFunction,    <span class="cm">// Name of your callback method</span>
+        <span class="ty">bytes</span>   args                 <span class="cm">// Extra args forwarded to callback</span>
+    ) <span class="kw">external payable returns</span> (<span class="ty">uint256</span> requestId);
+}
+
+<span class="kw">interface</span> ILLMServiceCallback {
+    <span class="kw">function</span> <span class="fn">handleResult</span>(
+        <span class="ty">uint256</span> requestId,
+        <span class="ty">string</span>  <span class="kw">calldata</span> result,
+        <span class="ty">bytes</span>   <span class="kw">calldata</span> args
+    ) <span class="kw">external</span>;
+}</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Networks ─────────────────────────────────────────────── -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header">
+        <p class="section-tag">Deployments</p>
+        <h2 class="section-title">Deploy anywhere</h2>
+        <p class="section-sub">The HPP AI Service runs on HPP Network natively and can be deployed on any EVM-compatible chain.</p>
+      </div>
+      <div class="networks">
+        <div class="network-card network-card--primary">
+          <div class="network-badge network-badge--live">Testnet Live</div>
+          <div class="network-dot network-dot--active"></div>
+          <h3>HPP Sepolia</h3>
+          <p class="network-chain">Chain ID: <code>181228</code> · RPC: <code>sepolia.hpp.io</code></p>
+        </div>
+        <div class="network-card">
+          <div class="network-badge network-badge--soon">Coming Soon</div>
+          <div class="network-dot"></div>
+          <h3>HPP Mainnet</h3>
+          <p class="network-chain">Chain ID: <code>190415</code></p>
+        </div>
+        <div class="network-card">
+          <div class="network-badge network-badge--evm">EVM Compatible</div>
+          <div class="network-dot network-dot--evm"></div>
+          <h3>Ethereum</h3>
+          <p class="network-chain">Mainnet &amp; Sepolia</p>
+        </div>
+        <div class="network-card">
+          <div class="network-badge network-badge--evm">EVM Compatible</div>
+          <div class="network-dot network-dot--evm"></div>
+          <h3>Polygon</h3>
+          <p class="network-chain">Polygon PoS Mainnet</p>
+        </div>
+        <div class="network-card">
+          <div class="network-badge network-badge--evm">EVM Compatible</div>
+          <div class="network-dot network-dot--evm"></div>
+          <h3>Arbitrum</h3>
+          <p class="network-chain">Arbitrum One</p>
+        </div>
+        <div class="network-card">
+          <div class="network-badge network-badge--evm">EVM Compatible</div>
+          <div class="network-dot network-dot--evm"></div>
+          <h3>Base</h3>
+          <p class="network-chain">Base Mainnet</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Use Cases ──────────────────────────────────────────────── -->
+  <section class="section section-alt">
+    <div class="container">
+      <div class="section-header">
+        <p class="section-tag">Use Cases</p>
+        <h2 class="section-title">What will you build?</h2>
+      </div>
+      <div class="usecases">
+        <div class="usecase-card">
+          <div class="usecase-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <h4>AI-Gated Content</h4>
+          <p>Let AI moderate, translate, or score user-submitted content before it's accepted on-chain.</p>
+        </div>
+        <div class="usecase-card">
+          <div class="usecase-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+          </div>
+          <h4>Smart Contract Audits</h4>
+          <p>Trigger automated AI code reviews or risk assessments directly from a governance contract.</p>
+        </div>
+        <div class="usecase-card">
+          <div class="usecase-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+          </div>
+          <h4>AI-Powered DAOs</h4>
+          <p>Use AI to summarise, score, and classify governance proposals before putting them to a vote.</p>
+        </div>
+        <div class="usecase-card">
+          <div class="usecase-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+          </div>
+          <h4>On-chain Games</h4>
+          <p>Generate dynamic NPC dialogue, quest descriptions, or game events using AI with verifiable on-chain results.</p>
+        </div>
+        <div class="usecase-card">
+          <div class="usecase-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+          </div>
+          <h4>Identity & KYC</h4>
+          <p>Run AI document analysis or fraud detection and write a verified result on-chain for other contracts to consume.</p>
+        </div>
+        <div class="usecase-card">
+          <div class="usecase-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+          </div>
+          <h4>Dynamic NFTs</h4>
+          <p>Generate unique traits, stories, or metadata for NFTs using AI at mint time — fully verifiable on-chain.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Node Runners ──────────────────────────────────────────── -->
+  <section class="section" id="nodes">
+    <div class="container">
+      <div class="section-header">
+        <p class="section-tag">Decentralisation</p>
+        <h2 class="section-title">Run an AI Service Node</h2>
+        <p class="section-sub">Node operators power the network by listening for requests, calling AI provider APIs, and submitting results back to the contract. Bring your own API keys.</p>
+      </div>
+      <div class="node-layout">
+        <div class="node-steps">
+          <div class="node-step">
+            <div class="node-step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+            </div>
+            <div>
+              <h4>Clone &amp; install</h4>
+              <p>Clone the repo and install Node.js dependencies.</p>
+            </div>
+          </div>
+          <div class="node-step">
+            <div class="node-step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </div>
+            <div>
+              <h4>Configure API keys</h4>
+              <p>Add your AI provider API keys to the node config. Support any subset of platforms.</p>
+            </div>
+          </div>
+          <div class="node-step">
+            <div class="node-step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            </div>
+            <div>
+              <h4>Run &amp; authorize</h4>
+              <p>Start the node — it auto-generates a wallet. Fund it with gas and apply to be authorized on the contract.</p>
+            </div>
+          </div>
+        </div>
+        <div class="code-window">
+          <div class="code-window-bar">
+            <div class="code-dots"><span></span><span></span><span></span></div>
+            <span class="code-filename">terminal</span>
+          </div>
+          <pre class="code-block"><code><span class="cmt"># Clone &amp; install</span>
+git clone https://github.com/aergoio/llm-service-evm
+cd llm-service-evm/nodes
+npm install
+
+<span class="cmt"># Run against HPP Sepolia testnet</span>
+node llm-service.js hpp-sepolia
+
+<span class="cmt"># Or keep it alive with pm2</span>
+pm2 start llm-service.js \
+    --name "ai-service-sepolia" \
+    -- hpp-sepolia</code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── CTA ──────────────────────────────────────────────────── -->
+  <section class="cta-section">
+    <div class="cta-glow"></div>
+    <div class="container cta-inner">
+      <h2>Ready to add AI to your smart contract?</h2>
+      <p>Full integration guide, contract addresses, and node setup docs are on GitHub.</p>
+      <div class="cta-actions">
+        <a href="https://github.com/aergoio/llm-service-evm" target="_blank" rel="noopener" class="btn btn-primary btn-lg">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.17 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C19.138 20.167 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+          View Full Documentation
+        </a>
+        <a href="#integrate" class="btn btn-ghost btn-lg">See Integration Code</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Footer ───────────────────────────────────────────────── -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-logo">
+        <div class="logo-icon logo-icon--sm">
+          <svg viewBox="0 0 28 28" fill="none"><rect x="3" y="3" width="22" height="22" rx="6" stroke="currentColor" stroke-width="2"/><path d="M9 14h10M14 9v10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="9" cy="9" r="1.5" fill="currentColor"/><circle cx="19" cy="19" r="1.5" fill="currentColor"/><circle cx="19" cy="9" r="1.5" fill="currentColor"/><circle cx="9" cy="19" r="1.5" fill="currentColor"/></svg>
+        </div>
+        <span>HPP AI Service</span>
+      </div>
+      <p class="footer-copy">Apache-2.0 License · Built on HPP Network</p>
+      <a href="https://github.com/aergoio/llm-service-evm" target="_blank" rel="noopener" class="footer-gh">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.17 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C19.138 20.167 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+      </a>
+    </div>
+  </footer>
+
+  <script>
+    // Smooth scroll
+    document.querySelectorAll('a[href^="#"]').forEach(a => {
+      a.addEventListener('click', e => {
+        const target = document.querySelector(a.getAttribute('href'));
+        if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      });
+    });
+
+    // Mobile nav
+    document.getElementById('navToggle').addEventListener('click', () => {
+      document.getElementById('mainNav').classList.toggle('nav--open');
+    });
+
+    // Integration code tabs
+    const snippets = {
+      1: {
+        file: 'MyContract.sol',
+        code: `import "./llm-service.sol";
+
+contract MyContract is ILLMServiceCallback {
+    ILLMService public aiService;
+
+    constructor(address _aiService) {
+        aiService = ILLMService(_aiService);
+    }
+}`
+      },
+      2: {
+        file: 'MyContract.sol',
+        code: `function askAI(
+    bytes32 configHash,
+    string calldata userInput
+) external payable {
+    string memory input = string(abi.encodePacked(
+        '{"user_input":"', userInput, '"}'
+    ));
+
+    aiService.newRequest{value: msg.value}(
+        bytes32(0),          // platform (from config)
+        bytes32(0),          // model (from config)
+        configHash,          // SHA256 of your prompt
+        input,               // JSON runtime values
+        1,                   // redundancy (quorum = 1)
+        true,                // extract <result> tags
+        false,               // store on-chain
+        "handleAIResult",    // your callback name
+        abi.encode(msg.sender)
+    );
+}`
+      },
+      3: {
+        file: 'MyContract.sol',
+        code: `function handleAIResult(
+    uint256 requestId,
+    string calldata result,
+    bytes calldata args
+) external override {
+    require(
+        msg.sender == address(aiService),
+        "unauthorized"
+    );
+
+    address requester = abi.decode(args, (address));
+
+    // result is the AI-generated string
+    // e.g. "positive" / "negative" / a JSON blob
+    emit AIResultReceived(requester, result);
+}`
+      },
+      4: {
+        file: 'prompt.config',
+        code: `model: anthropic/claude-sonnet-4-20250514
+You are a helpful assistant that classifies
+user sentiment in one word.
+
+User message: {{user_input}}
+
+Respond with your classification inside
+<result></result> tags. Output only one word:
+positive, negative, or neutral.`
+      }
+    };
+
+    document.querySelectorAll('.integrate-step').forEach(el => {
+      el.addEventListener('click', () => {
+        document.querySelectorAll('.integrate-step').forEach(s => s.classList.remove('active'));
+        el.classList.add('active');
+        const step = el.dataset.step;
+        const s = snippets[step];
+        document.getElementById('codeFilename').textContent = s.file;
+        document.getElementById('codeContent').textContent = s.code;
+      });
+    });
+  </script>
+</body>
+</html>
