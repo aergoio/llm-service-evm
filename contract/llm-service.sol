@@ -13,15 +13,24 @@ interface IERC20 {
  * @dev Field semantics match the original per-parameter docs on newRequest (pre-struct API).
  */
 struct RequestArgs {
-    bytes32 platform;            // LLM platform name
-    bytes32 model;               // Model name
-    bytes32 prompt;              // SHA256 hash of the prompt
-    string input;                // JSON input string
-    uint8 redundancy;            // Number of matching results required (minimum 1)
-    bool returnContentWithinResultTag; // Whether to extract content from result tag
-    bool storeResultOffchain;    // Whether to store result off-chain
-    string callback;             // Callback function signature (e.g., "handleResult(uint256,string)")
-    bytes args;                  // Encoded callback arguments
+    /// @notice LLM platform name
+    bytes32 platform;
+    /// @notice Model name
+    bytes32 model;
+    /// @notice SHA256 hash of the prompt
+    bytes32 prompt;
+    /// @notice JSON input string
+    string input;
+    /// @notice Number of matching results required (minimum 1)
+    uint8 redundancy;
+    /// @notice Whether to extract content from result tag
+    bool returnContentWithinResultTag;
+    /// @notice Whether to store result off-chain
+    bool storeResultOffchain;
+    /// @notice Callback function signature (e.g., "handleResult(uint256,string)")
+    string callback;
+    /// @notice Encoded callback arguments
+    bytes args;
 }
 
 /**

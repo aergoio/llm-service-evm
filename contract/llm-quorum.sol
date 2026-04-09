@@ -10,6 +10,10 @@ import {ILLMService, IERC20, RequestArgs} from "./llm-service.sol";
  *      (like LLMService), this contract sends the same request to multiple different
  *      models and checks consensus between their responses.
  *      It delegates the actual LLM processing to the LLMService contract.
+ *
+ *      Payment:
+ *      - approve + newRequest (transferFrom), or
+ *      - token.transferAndCall(quorum, amount, abi.encode(QuorumRequestArgs)) → onTokenTransfer
  */
 contract LLMQuorum {
     // ============================================================
@@ -21,12 +25,36 @@ contract LLMQuorum {
         bytes32 model;     // e.g., "gpt-4", "claude-3", "gemini-pro"
     }
 
+    /**
+     * @notice Arguments for newRequest and ERC-20 transferAndCall payloads
+     * @dev Field semantics match the previous per-parameter docs on newRequest (pre-struct API).
+     */
+    struct QuorumRequestArgs {
+        /// @notice SHA256 hash of the prompt
+        bytes32 prompt;
+        /// @notice JSON input string
+        string input;
+        /// @notice Array of models to query
+        ModelInfo[] models;
+        /// @notice Number of matching results required (0 = majority)
+        uint8 quorumThreshold;
+        /// @notice Number of node confirmations per model
+        uint8 redundancy;
+        /// @notice Whether to extract content from result tag
+        bool returnContentWithinResultTag;
+        /// @notice Whether to store result off-chain
+        bool storeResultOffchain;
+        /// @notice Callback function signature
+        string callback;
+        /// @notice Encoded callback arguments
+        bytes args;
+    }
+
     struct QuorumRequest {
         address caller;           // Contract that made the request
         string callback;          // Callback function signature
         bytes args;               // Original callback arguments
         uint8 quorumThreshold;    // Number of matching results required
-        //uint8 numModels;          // Total number of models queried
         uint8 resultsReceived;    // Number of results received so far
         bool storeResultOffchain; // Whether result is stored off-chain (result is already a hash)
     }
@@ -152,21 +180,37 @@ contract LLMQuorum {
     // ============================================================
 
     /**
-     * @notice Submit a new quorum request across multiple models
-     * @param prompt SHA256 hash of the prompt
-     * @param input JSON input string
-     * @param models Array of models to query
-     * @param quorumThreshold Number of matching results required (0 = majority)
-     * @param redundancy Number of node confirmations per model
-     * @param returnContentWithinResultTag Whether to extract content from result tag
-     * @param storeResultOffchain Whether to store result off-chain
-     * @param callback Callback function signature
-     * @param args Encoded callback arguments
+     * @notice Callback for ERC-20 transferAndCall (e.g. ERC-677 / Arbitrum-style)
+     * @dev msg.sender must be the payment token. Tokens are already in this contract; `from` is the logical caller (must be a contract).
+     *      `data` must be abi.encode(QuorumRequestArgs).
+     */
+     function onTokenTransfer(address from, uint256 amount, bytes calldata data) external {
+        address token = msg.sender;
+        QuorumRequestArgs memory req = abi.decode(data, (QuorumRequestArgs));
+        _newQuorumRequest(from, token, amount, req);
+    }
+
+    /**
+     * @notice Submit a new quorum request across multiple models (approve + transferFrom)
+     * @param q Request payload (same as abi.decode in onTokenTransfer)
      * @param token ERC-20 held by msg.sender (approved to this contract)
      * @param amount Amount pulled from caller (must be >= total; excess not refunded)
-     * @return requestId The ID of the created quorum request
      */
     function newRequest(
+        QuorumRequestArgs calldata requestArgs,
+        address token,
+        uint256 amount
+    ) external returns (uint256 requestId) {
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMQuorum: transfer failed");
+        QuorumRequestArgs memory req = requestArgs;
+        return _newQuorumRequest(msg.sender, token, amount, req);
+    }
+
+    /**
+     * @notice ABI payload for transferAndCall (`data` in onTokenTransfer)
+     * @dev Same field order and types as QuorumRequestArgs / abi.decode in onTokenTransfer
+     */
+    function encodeQuorumRequest(
         bytes32 prompt,
         string calldata input,
         ModelInfo[] calldata models,
@@ -175,24 +219,58 @@ contract LLMQuorum {
         bool returnContentWithinResultTag,
         bool storeResultOffchain,
         string calldata callback,
-        bytes calldata args,
+        bytes calldata args
+    ) external pure returns (bytes memory) {
+        return abi.encode(
+            QuorumRequestArgs({
+                prompt: prompt,
+                input: input,
+                models: models,
+                quorumThreshold: quorumThreshold,
+                redundancy: redundancy,
+                returnContentWithinResultTag: returnContentWithinResultTag,
+                storeResultOffchain: storeResultOffchain,
+                callback: callback,
+                args: args
+            })
+        );
+    }
+
+    /**
+     * @dev Internal function to create a new quorum request
+     * @param caller The caller address
+     * @param token The payment token address
+     * @param paidAmount The amount paid in the payment token
+     * @param requestArgs The request arguments
+     * @return requestId The request ID
+     */
+    function _newQuorumRequest(
+        address caller,
         address token,
-        uint256 amount
-    ) external returns (uint256 requestId) {
+        uint256 paidAmount,
+        QuorumRequestArgs memory q
+    )
+        internal
+        returns (uint256 requestId)
+    {
         // Validate caller is a contract
-        require(msg.sender != tx.origin, "LLMQuorum: service is for contracts only");
+        require(caller != tx.origin, "LLMQuorum: service is for contracts only");
 
         // Validate LLM service is configured
         require(address(llmService) != address(0), "LLMQuorum: service not configured");
+
+        ModelInfo[] memory models = q.models;
 
         // Validate models
         require(models.length >= 1, "LLMQuorum: at least one model required");
         require(models.length <= 255, "LLMQuorum: too many models");
 
         // Set default redundancy
+        uint8 redundancy = q.redundancy;
         if (redundancy == 0) redundancy = 1;
 
         // Calculate quorum threshold (default: simple majority = floor(n/2) + 1)
+        uint8 quorumThreshold = q.quorumThreshold;
         if (quorumThreshold == 0) {
             quorumThreshold = uint8(models.length / 2) + 1;
         }
@@ -206,21 +284,20 @@ contract LLMQuorum {
             require(psi == 0, "LLMQuorum: token not accepted or price not configured");
             totalPrice += modelPrice * redundancy;
         }
-        require(amount >= totalPrice, "LLMQuorum: insufficient payment");
-        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMQuorum: transfer failed");
+        require(paidAmount >= totalPrice, "LLMQuorum: insufficient payment");
+
         require(IERC20(token).approve(address(llmService), totalPrice), "LLMQuorum: approve failed");
 
         // Create quorum request
         requestId = ++lastRequestId;
 
         requests[requestId] = QuorumRequest({
-            caller: msg.sender,
-            callback: callback,
-            args: args,
+            caller: caller,
+            callback: q.callback,
+            args: q.args,
             quorumThreshold: quorumThreshold,
-            //numModels: uint8(models.length),
             resultsReceived: 0,
-            storeResultOffchain: storeResultOffchain
+            storeResultOffchain: q.storeResultOffchain
         });
 
         // Create sub-requests for each model
@@ -236,11 +313,11 @@ contract LLMQuorum {
                 RequestArgs({
                     platform: models[i].platform,
                     model: models[i].model,
-                    prompt: prompt,
-                    input: input,
+                    prompt: q.prompt,
+                    input: q.input,
                     redundancy: redundancy,
-                    returnContentWithinResultTag: returnContentWithinResultTag,
-                    storeResultOffchain: storeResultOffchain,
+                    returnContentWithinResultTag: q.returnContentWithinResultTag,
+                    storeResultOffchain: q.storeResultOffchain,
                     callback: "onSubResult",
                     args: subArgs
                 }),
@@ -430,6 +507,31 @@ interface ILLMQuorum {
         bytes32 model;
     }
 
+    /**
+     * @notice Arguments for newRequest and ERC-20 transferAndCall payloads
+     * @dev Field semantics match the previous per-parameter docs on newRequest (pre-struct API).
+     */
+    struct QuorumRequestArgs {
+        /// @notice SHA256 hash of the prompt
+        bytes32 prompt;
+        /// @notice JSON input string
+        string input;
+        /// @notice Array of models to query
+        ModelInfo[] models;
+        /// @notice Number of matching results required (0 = majority)
+        uint8 quorumThreshold;
+        /// @notice Number of node confirmations per model
+        uint8 redundancy;
+        /// @notice Whether to extract content from result tag
+        bool returnContentWithinResultTag;
+        /// @notice Whether to store result off-chain
+        bool storeResultOffchain;
+        /// @notice Callback function signature
+        string callback;
+        /// @notice Encoded callback arguments
+        bytes args;
+    }
+
     struct QuorumRequest {
         address caller;
         string callback;
@@ -445,19 +547,7 @@ interface ILLMQuorum {
         address token
     ) external view returns (uint256 totalPrice);
 
-    function newRequest(
-        bytes32 prompt,
-        string calldata input,
-        ModelInfo[] calldata models,
-        uint8 quorumThreshold,
-        uint8 redundancy,
-        bool returnContentWithinResultTag,
-        bool storeResultOffchain,
-        string calldata callback,
-        bytes calldata args,
-        address token,
-        uint256 amount
-    ) external returns (uint256 requestId);
+    function newRequest(QuorumRequestArgs calldata q, address token, uint256 amount) external returns (uint256 requestId);
 
     function getRequestInfo(uint256 requestId) external view returns (QuorumRequest memory);
 
@@ -518,15 +608,17 @@ contract LLMQuorumCaller is ILLMQuorumCallback {
         require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMQuorumCaller: pull failed");
         require(IERC20(token).approve(address(quorumService), amount), "LLMQuorumCaller: approve failed");
         uint256 requestId = quorumService.newRequest(
-            prompt,
-            input,
-            models,
-            0,         // default quorum threshold (majority)
-            1,         // redundancy of 1 per model
-            true,      // return content within result tag
-            false,     // don't store off-chain
-            "handleQuorumResult",
-            "",        // no extra args
+            LLMQuorum.QuorumRequestArgs({
+                prompt: prompt,
+                input: input,
+                models: models,
+                quorumThreshold: 0,
+                redundancy: 1,
+                returnContentWithinResultTag: true,
+                storeResultOffchain: false,
+                callback: "handleQuorumResult",
+                args: ""
+            }),
             token,
             amount
         );
