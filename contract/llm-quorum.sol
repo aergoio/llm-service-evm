@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache 2.0
 pragma solidity ^0.8.20;
 
-import {ILLMService} from "./llm-service.sol";
+import {ILLMService, IERC20, RequestArgs} from "./llm-service.sol";
 
 /**
  * @title LLMQuorum
@@ -123,14 +123,15 @@ contract LLMQuorum {
     // ============================================================
 
     /**
-     * @notice Get total price for a list of models
+     * @notice Get total price for a list of models in `token` smallest units
      * @param models Array of ModelInfo structs
      * @param redundancy Number of node confirmations per model (default 1)
-     * @return totalPrice Total price in wei
+     * @param token Payment token (must be accepted on LLMService with non-zero ratio)
      */
     function getPrice(
         ModelInfo[] calldata models,
-        uint8 redundancy
+        uint8 redundancy,
+        address token
     ) external view returns (uint256 totalPrice) {
         require(address(llmService) != address(0), "LLMQuorum: service not configured");
         require(models.length >= 1, "LLMQuorum: at least one model required");
@@ -138,7 +139,8 @@ contract LLMQuorum {
         if (redundancy == 0) redundancy = 1;
 
         for (uint256 i = 0; i < models.length; i++) {
-            uint256 modelPrice = llmService.getPrice(models[i].platform, models[i].model);
+            (uint256 modelPrice, uint8 psi) = llmService.getPriceInToken(models[i].platform, models[i].model, token);
+            require(psi == 0, "LLMQuorum: token not accepted or price not configured");
             totalPrice += modelPrice * redundancy;
         }
 
@@ -160,6 +162,8 @@ contract LLMQuorum {
      * @param storeResultOffchain Whether to store result off-chain
      * @param callback Callback function signature
      * @param args Encoded callback arguments
+     * @param token ERC-20 held by msg.sender (approved to this contract)
+     * @param amount Amount pulled from caller (must be >= total; excess not refunded)
      * @return requestId The ID of the created quorum request
      */
     function newRequest(
@@ -171,8 +175,10 @@ contract LLMQuorum {
         bool returnContentWithinResultTag,
         bool storeResultOffchain,
         string calldata callback,
-        bytes calldata args
-    ) external payable returns (uint256 requestId) {
+        bytes calldata args,
+        address token,
+        uint256 amount
+    ) external returns (uint256 requestId) {
         // Validate caller is a contract
         require(msg.sender != tx.origin, "LLMQuorum: service is for contracts only");
 
@@ -193,13 +199,16 @@ contract LLMQuorum {
         require(quorumThreshold >= 1, "LLMQuorum: threshold must be at least 1");
         require(quorumThreshold <= models.length, "LLMQuorum: threshold exceeds model count");
 
-        // Calculate total price
+        // Calculate total price (token smallest units)
         uint256 totalPrice = 0;
         for (uint256 i = 0; i < models.length; i++) {
-            uint256 modelPrice = llmService.getPrice(models[i].platform, models[i].model);
+            (uint256 modelPrice, uint8 psi) = llmService.getPriceInToken(models[i].platform, models[i].model, token);
+            require(psi == 0, "LLMQuorum: token not accepted or price not configured");
             totalPrice += modelPrice * redundancy;
         }
-        require(msg.value >= totalPrice, "LLMQuorum: insufficient payment");
+        require(amount >= totalPrice, "LLMQuorum: insufficient payment");
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMQuorum: transfer failed");
+        require(IERC20(token).approve(address(llmService), totalPrice), "LLMQuorum: approve failed");
 
         // Create quorum request
         requestId = ++lastRequestId;
@@ -216,32 +225,31 @@ contract LLMQuorum {
 
         // Create sub-requests for each model
         for (uint256 i = 0; i < models.length; i++) {
-            uint256 modelPrice = llmService.getPrice(models[i].platform, models[i].model);
+            (uint256 modelPrice, uint8 psi) = llmService.getPriceInToken(models[i].platform, models[i].model, token);
+            require(psi == 0, "LLMQuorum: token not accepted or price not configured");
             uint256 subPayment = modelPrice * redundancy;
 
             // Encode our requestId as callback args for the sub-request
             bytes memory subArgs = abi.encode(requestId);
 
-            llmService.newRequest{value: subPayment}(
-                models[i].platform,
-                models[i].model,
-                prompt,
-                input,
-                redundancy,
-                returnContentWithinResultTag,
-                storeResultOffchain,
-                "onSubResult",
-                subArgs
+            llmService.newRequest(
+                RequestArgs({
+                    platform: models[i].platform,
+                    model: models[i].model,
+                    prompt: prompt,
+                    input: input,
+                    redundancy: redundancy,
+                    returnContentWithinResultTag: returnContentWithinResultTag,
+                    storeResultOffchain: storeResultOffchain,
+                    callback: "onSubResult",
+                    args: subArgs
+                }),
+                token,
+                subPayment
             );
         }
 
         emit NewQuorumRequest(requestId, uint8(models.length), quorumThreshold);
-
-        // Refund excess payment
-        if (msg.value > totalPrice) {
-            (bool success, ) = msg.sender.call{value: msg.value - totalPrice}("");
-            require(success, "LLMQuorum: refund failed");
-        }
 
         return requestId;
     }
@@ -395,30 +403,17 @@ contract LLMQuorum {
     }
 
     /**
-     * @notice Withdraw collected fees
-     * @param amount Amount to withdraw (0 for full balance)
-     * @param recipient Recipient address (zero address defaults to owner)
+     * @notice Withdraw ERC-20 balance held by this contract (e.g. excess user payments)
      */
-    function withdrawFees(uint256 amount, address payable recipient) external onlyOwner {
-        if (amount == 0) {
-            amount = address(this).balance;
-        }
+    function withdrawFees(address token, uint256 amount, address recipient) external onlyOwner {
         if (recipient == address(0)) {
-            recipient = payable(owner);
+            recipient = owner;
         }
-        (bool success, ) = recipient.call{value: amount}("");
-        require(success, "LLMQuorum: withdrawal failed");
+        if (amount == 0) {
+            amount = IERC20(token).balanceOf(address(this));
+        }
+        require(IERC20(token).transfer(recipient, amount), "LLMQuorum: withdrawal failed");
     }
-
-    /**
-     * @notice Receive function to accept ETH
-     */
-    receive() external payable {}
-
-    /**
-     * @notice Fallback function
-     */
-    fallback() external payable {}
 }
 
 // ============================================================
@@ -446,7 +441,8 @@ interface ILLMQuorum {
 
     function getPrice(
         ModelInfo[] calldata models,
-        uint8 redundancy
+        uint8 redundancy,
+        address token
     ) external view returns (uint256 totalPrice);
 
     function newRequest(
@@ -458,8 +454,10 @@ interface ILLMQuorum {
         bool returnContentWithinResultTag,
         bool storeResultOffchain,
         string calldata callback,
-        bytes calldata args
-    ) external payable returns (uint256 requestId);
+        bytes calldata args,
+        address token,
+        uint256 amount
+    ) external returns (uint256 requestId);
 
     function getRequestInfo(uint256 requestId) external view returns (QuorumRequest memory);
 
@@ -513,9 +511,13 @@ contract LLMQuorumCaller is ILLMQuorumCallback {
     function askMultipleModels(
         bytes32 prompt,
         string calldata input,
-        LLMQuorum.ModelInfo[] calldata models
-    ) external payable returns (uint256) {
-        uint256 requestId = quorumService.newRequest{value: msg.value}(
+        LLMQuorum.ModelInfo[] calldata models,
+        address token,
+        uint256 amount
+    ) external returns (uint256) {
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMQuorumCaller: pull failed");
+        require(IERC20(token).approve(address(quorumService), amount), "LLMQuorumCaller: approve failed");
+        uint256 requestId = quorumService.newRequest(
             prompt,
             input,
             models,
@@ -524,7 +526,9 @@ contract LLMQuorumCaller is ILLMQuorumCallback {
             true,      // return content within result tag
             false,     // don't store off-chain
             "handleQuorumResult",
-            ""         // no extra args
+            "",        // no extra args
+            token,
+            amount
         );
 
         emit QuorumRequestSent(requestId);
@@ -544,5 +548,4 @@ contract LLMQuorumCaller is ILLMQuorumCallback {
         emit QuorumResultReceived(requestId, result);
     }
 
-    receive() external payable {}
 }

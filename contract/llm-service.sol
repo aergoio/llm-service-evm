@@ -1,28 +1,55 @@
 // SPDX-License-Identifier: Apache 2.0
 pragma solidity ^0.8.20;
 
+interface IERC20 {
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function approve(address spender, uint256 amount) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
+}
+
+/**
+ * @notice Arguments for LLMService.newRequest and ERC-20 transferAndCall payloads
+ * @dev Field semantics match the original per-parameter docs on newRequest (pre-struct API).
+ */
+struct RequestArgs {
+    bytes32 platform;            // LLM platform name
+    bytes32 model;               // Model name
+    bytes32 prompt;              // SHA256 hash of the prompt
+    string input;                // JSON input string
+    uint8 redundancy;            // Number of matching results required (minimum 1)
+    bool returnContentWithinResultTag; // Whether to extract content from result tag
+    bool storeResultOffchain;    // Whether to store result off-chain
+    string callback;             // Callback function signature (e.g., "handleResult(uint256,string)")
+    bytes args;                  // Encoded callback arguments
+}
+
 /**
  * @title LLMService
  * @notice Oracle-style contract for requesting LLM services from authorized off-chain nodes.
- * @dev Users pay a fee to submit requests. Authorized nodes process and return results.
+ * @dev Users pay a fee in accepted ERC-20 tokens. Authorized nodes process and return results.
  *      Supports redundancy/quorum - multiple nodes can submit, and consensus triggers callback.
+ *
+ *      Payment:
+ *      - approve + newRequest (transferFrom), or
+ *      - token.transferAndCall(service, amount, abi.encode(RequestArgs)) → onTokenTransfer
+ *
+ *      Pricing: `prices[platform][model]` is in US cents (50 = USD 0.50), `FREE_TIER` for free models, or `0`
+ *      for unsupported (`getPrice` returns `(0, false)`). There is no default-key fallback; each tier is read directly.
+ *
+ *      Token amount = `priceCents * acceptedToken[token]`. Set `acceptedToken` to **10^(decimals - 2)** so cents
+ *      map to smallest units (e.g. USDT 6 decimals → 10^4; 50 cents × 10^4 = 500_000). Requires decimals >= 2.
+ *      `acceptedToken[token] == 0` means that token is not accepted. Excess payment is not refunded.
  */
 contract LLMService {
     // ============================================================
     //                          TYPES
     // ============================================================
 
+    /// @notice Stored request: user payload (RequestArgs) plus trusted caller (last field)
     struct Request {
-        bytes32 platform;            // LLM platform (e.g., "openai", "anthropic")
-        bytes32 model;               // Model name (e.g., "gpt-4", "claude-3")
-        bytes32 prompt;              // SHA256 hash of prompt
-        string input;                // JSON input string (serialized from original table)
-        uint8 redundancy;            // Number of matching results required
-        bool returnContentWithinResultTag; // Whether to extract content from within the <result> tag
-        bool storeResultOffchain;    // Whether to store result off-chain and return the hash of the result
+        RequestArgs payload;
         address caller;              // Contract that made the request
-        string callback;             // Callback function signature
-        bytes args;                  // Encoded callback arguments
     }
 
     struct Submission {
@@ -38,9 +65,19 @@ contract LLMService {
     address[] public authorizedNodes;
     mapping(address => bool) public isAuthorizedNode;
 
-    // prices[platform][model] = price in wei
+    /// @notice Per-token multiplier: price (cents) × ratio = amount in token smallest units (0 = not accepted)
+    mapping(address => uint256) public acceptedToken;
+
+    /// @notice US cents per redundancy unit, `FREE_TIER` for free models, or 0 (unsupported — see getPrice)
     mapping(bytes32 => mapping(bytes32 => uint256)) public prices;
-    mapping(bytes32 => mapping(bytes32 => bool)) public priceExists;
+
+    /// @dev Sentinel in `prices`: tier is offered at no charge (`getPrice` returns `(0, true)`)
+    uint256 public constant FREE_TIER = type(uint256).max;
+
+    /// @dev Second return value of `getPriceInToken`
+    uint8 public constant PRICE_IN_TOKEN_OK = 0;
+    uint8 public constant PRICE_IN_TOKEN_MODEL_UNSUPPORTED = 1;
+    uint8 public constant PRICE_IN_TOKEN_TOKEN_NOT_ACCEPTED = 2;
 
     uint256 public lastRequestId;
     mapping(uint256 => Request) public requests;
@@ -63,6 +100,7 @@ contract LLMService {
     event NodeRemoved(address indexed node);
     event PriceUpdated(bytes32 platform, bytes32 model, uint256 price);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event AcceptedTokenUpdated(address indexed token, uint256 conversionRatio);
     event NodeFunded(address indexed node, uint256 amount);
 
     // ============================================================
@@ -163,40 +201,59 @@ contract LLMService {
     // ============================================================
 
     /**
-     * @notice Set the price for a platform/model combination
-     * @param platform The LLM platform name
-     * @param model The model name
-     * @param price The price in wei
+     * @notice Set the price for a platform/model combination (US cents per redundancy unit)
+     * @param price Cents (50 = USD 0.50), `FREE_TIER` for a free model, or 0 (unsupported)
      */
     function setPrice(bytes32 platform, bytes32 model, uint256 price) external onlyOwner {
         prices[platform][model] = price;
-        priceExists[platform][model] = true;
         emit PriceUpdated(platform, model, price);
     }
 
     /**
-     * @notice Get the price for a platform/model combination
-     * @dev Falls back to default (bytes32(0), bytes32(0)) price if specific price not set
-     * @param platform The LLM platform name
-     * @param model The model name
-     * @return The price in wei
+     * @notice Set conversion multiplier for a payment token (0 removes acceptance)
+     * @dev Use **10^(tokenDecimals - 2)** when `prices` are US cents (subtract 2 decimal places vs whole token units).
      */
-    function getPrice(bytes32 platform, bytes32 model) public view returns (uint256) {
-        if (priceExists[platform][model]) {
-            return prices[platform][model];
-        }
-        // Fallback to default price
-        return prices[bytes32(0)][bytes32(0)];
+    function setAcceptedToken(address token, uint256 conversionRatio) external onlyOwner {
+        require(token != address(0), "LLMService: token is zero address");
+        acceptedToken[token] = conversionRatio;
+        emit AcceptedTokenUpdated(token, conversionRatio);
     }
 
     /**
-     * @notice Check if a price is configured for platform/model or default
-     * @param platform The LLM platform name
-     * @param model The model name
-     * @return True if price is configured
+     * @notice Resolved price in US cents (per redundancy unit) and whether the tier is offered
+     * @dev Stored `0` → unsupported. `FREE_TIER` → free `(0, true)`.
      */
-    function isPriceConfigured(bytes32 platform, bytes32 model) public view returns (bool) {
-        return priceExists[platform][model] || priceExists[bytes32(0)][bytes32(0)];
+    function getPrice(bytes32 platform, bytes32 model) public view returns (uint256 priceCents, bool supported) {
+        uint256 raw = prices[platform][model];
+
+        if (raw == 0) {
+            return (0, false);
+        }
+        if (raw == FREE_TIER) {
+            return (0, true);
+        }
+        return (raw, true);
+    }
+
+    /**
+     * @notice Price in `token` smallest units (per redundancy unit)
+     * @return amount 0 when tier is free or on error (check status)
+     * @return status `PRICE_IN_TOKEN_OK`, `PRICE_IN_TOKEN_MODEL_UNSUPPORTED`, or `PRICE_IN_TOKEN_TOKEN_NOT_ACCEPTED`
+     */
+    function getPriceInToken(bytes32 platform, bytes32 model, address token)
+        public
+        view
+        returns (uint256 amount, uint8 status)
+    {
+        uint256 ratio = acceptedToken[token];
+        if (ratio == 0) {
+            return (0, PRICE_IN_TOKEN_TOKEN_NOT_ACCEPTED);
+        }
+        (uint256 cents, bool ok) = getPrice(platform, model);
+        if (!ok) {
+            return (0, PRICE_IN_TOKEN_MODEL_UNSUPPORTED);
+        }
+        return (cents * ratio, PRICE_IN_TOKEN_OK);
     }
 
     // ============================================================
@@ -204,19 +261,34 @@ contract LLMService {
     // ============================================================
 
     /**
+     * @notice Callback for ERC-20 transferAndCall (e.g. Arbitrum-style / ERC-677)
+     * @dev msg.sender must be an accepted token. `from` becomes the request caller (must be a contract).
+     *      `data` must be abi.encode(RequestArgs).
+     */
+    function onTokenTransfer(address from, uint256 amount, bytes calldata data) external {
+        address token = msg.sender;
+        RequestArgs memory args = abi.decode(data, (RequestArgs));
+        _newRequest(from, token, amount, args);
+    }
+
+    /**
      * @notice Submit a new LLM request
-     * @param platform LLM platform name
-     * @param model Model name
-     * @param prompt SHA256 hash of the prompt
-     * @param input JSON input string
-     * @param callback Callback function signature (e.g., "handleResult(uint256,string)")
-     * @param args Encoded callback arguments
-     * @param redundancy Number of matching results required (minimum 1)
-     * @param returnContentWithinResultTag Whether to extract content from result tag
-     * @param storeResultOffchain Whether to store result off-chain
+     * @param req LLM request fields (see RequestArgs)
+     * @param token ERC-20 to pull from msg.sender
+     * @param amount Amount to transfer in (must be >= total price; excess is not refunded)
      * @return requestId The ID of the created request
      */
-    function newRequest(
+    function newRequest(RequestArgs calldata req, address token, uint256 amount) external returns (uint256 requestId) {
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMService: transfer failed");
+
+        RequestArgs memory m = req;
+        requestId = _newRequest(msg.sender, token, amount, m);
+    }
+
+    /**
+     * @notice ABI payload for transferAndCall
+     */
+    function encodeRequest(
         bytes32 platform,
         bytes32 model,
         bytes32 prompt,
@@ -226,46 +298,50 @@ contract LLMService {
         bool storeResultOffchain,
         string calldata callback,
         bytes calldata args
-    ) external payable returns (uint256 requestId) {
-        // Validate caller is a contract (service intended for contract-to-contract calls)
-        require(msg.sender != tx.origin, "LLMService: service is for contracts only");
+    ) external pure returns (bytes memory) {
+        return abi.encode(
+            RequestArgs({
+                platform: platform,
+                model: model,
+                prompt: prompt,
+                input: input,
+                redundancy: redundancy,
+                returnContentWithinResultTag: returnContentWithinResultTag,
+                storeResultOffchain: storeResultOffchain,
+                callback: callback,
+                args: args
+            })
+        );
+    }
+
+    function _newRequest(
+        address caller,
+        address token,
+        uint256 paidAmount,
+        RequestArgs memory a
+    )
+        internal
+        returns (uint256 requestId)
+    {
+        // Service is for contract callers only (newRequest: msg.sender; onTokenTransfer: from)
+        require(caller != tx.origin, "LLMService: service is for contracts only");
 
         // Validate redundancy
-        require(redundancy >= 1, "LLMService: redundancy must be at least 1");
-        require(redundancy <= authorizedNodes.length, "LLMService: redundancy exceeds available nodes");
+        require(a.redundancy >= 1, "LLMService: redundancy must be at least 1");
+        require(a.redundancy <= authorizedNodes.length, "LLMService: redundancy exceeds available nodes");
 
-        // Check price configuration and payment
-        require(isPriceConfigured(platform, model), "LLMService: prices not configured");
-        uint256 totalPrice = getPrice(platform, model);
-        totalPrice = totalPrice * redundancy;
-        require(msg.value >= totalPrice, "LLMService: insufficient payment");
+        (uint256 price, uint8 psi) = getPriceInToken(a.platform, a.model, token);
+        require(
+            psi == PRICE_IN_TOKEN_OK,
+            psi == PRICE_IN_TOKEN_MODEL_UNSUPPORTED ? "LLMService: model not supported" : "LLMService: token not accepted"
+        );
+        require(paidAmount >= price * uint256(a.redundancy), "LLMService: insufficient payment");
 
         // Create request
         requestId = ++lastRequestId;
+        requests[requestId] = Request({payload: a, caller: caller});
 
-        requests[requestId] = Request({
-            //payment: msg.value,
-            platform: platform,
-            model: model,
-            prompt: prompt,
-            input: input,
-            redundancy: redundancy,
-            returnContentWithinResultTag: returnContentWithinResultTag,
-            storeResultOffchain: storeResultOffchain,
-            caller: msg.sender,
-            callback: callback,
-            args: args
-        });
-
-        emit NewRequest(requestId, redundancy);
-
-        // Refund excess payment
-        if (msg.value > totalPrice) {
-            (bool success, ) = msg.sender.call{value: msg.value - totalPrice}("");
-            require(success, "LLMService: refund failed");
-        }
-
-        return requestId;
+        emit NewRequest(requestId, a.redundancy);
     }
 
     // ============================================================
@@ -319,7 +395,7 @@ contract LLMService {
         require(request.caller != address(0), "request not found");
 
         // If storeResultOffchain is true, the result is already a hash string
-        bytes32 resultHash = request.storeResultOffchain
+        bytes32 resultHash = request.payload.storeResultOffchain
             ? bytes32(bytes(result))
             : keccak256(abi.encodePacked(result));
 
@@ -340,7 +416,7 @@ contract LLMService {
         }
 
         // Check if we have enough matching results
-        if (numEqual >= request.redundancy) {
+        if (numEqual >= request.payload.redundancy) {
             // Fire callback and clean up
             _fireCallback(requestId, request, result, count);
         } else {
@@ -352,7 +428,7 @@ contract LLMService {
             submissionCount[requestId] = count + 1;
 
             // Store result on-chain only if not storing off-chain
-            if (!request.storeResultOffchain && bytes(results[requestId][resultHash]).length == 0) {
+            if (!request.payload.storeResultOffchain && bytes(results[requestId][resultHash]).length == 0) {
                 results[requestId][resultHash] = result;
             }
 
@@ -373,9 +449,9 @@ contract LLMService {
         string memory result,
         uint256 submissionsToClear
     ) internal {
-        address caller = request.caller;
-        string memory callback = request.callback;
-        bytes memory args = request.args;
+        address callbackTarget = request.caller;
+        string memory callback = request.payload.callback;
+        bytes memory cbArgs = request.payload.args;
 
         // Clear state BEFORE external call (reentrancy protection)
         delete requests[requestId];
@@ -392,12 +468,12 @@ contract LLMService {
             string(abi.encodePacked(callback, "(uint256,string,bytes)")),
             requestId,
             result,
-            args
+            cbArgs
         );
 
         // Call without checking success (like pcall in Lua)
         // solhint-disable-next-line avoid-low-level-calls
-        (bool callbackSuccess, ) = caller.call(callData);
+        (bool callbackSuccess, ) = callbackTarget.call(callData);
 
         emit Processed(requestId, callbackSuccess);
     }
@@ -407,28 +483,37 @@ contract LLMService {
     // ============================================================
 
     /**
-     * @notice Withdraw collected fees
-     * @param amount Amount to withdraw (0 for full balance)
-     * @param recipient Recipient address (zero address defaults to owner)
+     * @notice Withdraw collected ERC-20 fees
+     * @param token Token to withdraw
+     * @param amount Amount (0 = full balance of this contract for that token)
+     * @param recipient Recipient (zero = owner)
      */
-    function withdrawFees(uint256 amount, address payable recipient) external onlyOwner {
-        if (amount == 0) {
-            amount = address(this).balance;
-        }
+    function withdrawFees(address token, uint256 amount, address recipient) external onlyOwner {
         if (recipient == address(0)) {
-            recipient = payable(owner);
+            recipient = owner;
         }
-        (bool success, ) = recipient.call{value: amount}("");
-        require(success, "LLMService: withdrawal failed");
+        if (amount == 0) {
+            amount = IERC20(token).balanceOf(address(this));
+        }
+        require(IERC20(token).transfer(recipient, amount), "LLMService: withdrawal failed");
     }
 
     /**
-     * @notice Fund authorized nodes to reach a target balance
-     * @param targetBalance The desired balance each node should have
+     * @notice Send native ETH to authorized nodes so each reaches at least `targetBalance`.
+     * @dev Caller supplies the ETH via msg.value (must cover the aggregate shortfall). Surplus is returned to msg.sender.
      */
-    function fundNodes(uint256 targetBalance) external onlyOwner {
+    function fundNodes(uint256 targetBalance) external payable onlyOwner {
         uint256 len = authorizedNodes.length;
         require(len > 0, "LLMService: no authorized nodes");
+
+        uint256 totalNeeded = 0;
+        for (uint256 i = 0; i < len; i++) {
+            uint256 bal = authorizedNodes[i].balance;
+            if (bal < targetBalance) {
+                totalNeeded += targetBalance - bal;
+            }
+        }
+        require(msg.value >= totalNeeded, "LLMService: insufficient msg.value");
 
         for (uint256 i = 0; i < len; i++) {
             address node = authorizedNodes[i];
@@ -436,7 +521,6 @@ contract LLMService {
 
             if (currentBalance < targetBalance) {
                 uint256 amountToSend = targetBalance - currentBalance;
-                require(address(this).balance >= amountToSend, "LLMService: insufficient contract balance");
 
                 (bool success, ) = node.call{value: amountToSend}("");
                 require(success, "LLMService: transfer to node failed");
@@ -444,17 +528,13 @@ contract LLMService {
                 emit NodeFunded(node, amountToSend);
             }
         }
+
+        uint256 leftover = msg.value - totalNeeded;
+        if (leftover > 0) {
+            (bool ok, ) = payable(msg.sender).call{value: leftover}("");
+            require(ok, "LLMService: surplus refund failed");
+        }
     }
-
-    /**
-     * @notice Receive function to accept ETH
-     */
-    receive() external payable {}
-
-    /**
-     * @notice Fallback function
-     */
-    fallback() external payable {}
 }
 
 // ============================================================
@@ -496,24 +576,34 @@ contract LLMServiceCaller is ILLMServiceCallback {
     }
 
     /**
-     * @notice Send a request to the LLM service
+     * @notice Send a request to the LLM service (user must approve this contract, which forwards to LLMService)
      */
     function askLLM(
         bytes32 platform,
         bytes32 model,
         bytes32 prompt,
-        string calldata input
-    ) external payable returns (uint256) {
-        uint256 requestId = llmService.newRequest{value: msg.value}(
-            platform,
-            model,
-            prompt,
-            input,
-            1,     // redundancy of 1
-            true,  // return content within result tag
-            false, // return the whole result to this contract
-            "handleLLMResult",
-            ""     // no extra args
+        string calldata input,
+        address token,
+        uint256 amount
+    ) external returns (uint256) {
+
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMServiceCaller: pull failed");
+        require(IERC20(token).approve(address(llmService), amount), "LLMServiceCaller: approve failed");
+
+        uint256 requestId = llmService.newRequest(
+            RequestArgs({
+                platform: platform,
+                model: model,
+                prompt: prompt,
+                input: input,
+                redundancy: 1,
+                returnContentWithinResultTag: true,
+                storeResultOffchain: false,
+                callback: "handleLLMResult",
+                args: ""
+            }),
+            token,
+            amount
         );
 
         emit LLMRequestSent(requestId);
@@ -529,7 +619,6 @@ contract LLMServiceCaller is ILLMServiceCallback {
         emit LLMResultReceived(requestId, result);
     }
 
-    receive() external payable {}
 }
 
 // ============================================================
@@ -537,17 +626,12 @@ contract LLMServiceCaller is ILLMServiceCallback {
 // ============================================================
 
 interface ILLMService {
-    function newRequest(
-        bytes32 platform,
-        bytes32 model,
-        bytes32 prompt,
-        string calldata input,
-        uint8 redundancy,
-        bool returnContentWithinResultTag,
-        bool storeResultOffchain,
-        string calldata callback,
-        bytes calldata args
-    ) external payable returns (uint256);
+    function newRequest(RequestArgs calldata req, address token, uint256 amount) external returns (uint256);
 
-    function getPrice(bytes32 platform, bytes32 model) external view returns (uint256);
+    function getPrice(bytes32 platform, bytes32 model) external view returns (uint256 priceCents, bool supported);
+
+    function getPriceInToken(bytes32 platform, bytes32 model, address token)
+        external
+        view
+        returns (uint256 amount, uint8 status);
 }
