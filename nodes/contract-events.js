@@ -3,10 +3,27 @@ const path = require('path');
 
 const CONFIG_PATH = process.env.CONFIG_PATH || __dirname;
 
-let block_height_update_timer = null;
+// JSON.stringify drops Infinity (becomes null), which broke logIndex comparisons on restart.
+const MAX_PROCESSED_LOG_INDEX = Number.MAX_SAFE_INTEGER;
+
+function normalizeStoredLogIndex(v) {
+  if (v === null || v === undefined) return MAX_PROCESSED_LOG_INDEX;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  return -1;
+}
+
+/** Ethers v6 `queryFilter` EventLog uses `index`; `logIndex` is often undefined. */
+function eventLogIndex(event) {
+  const li = event.logIndex ?? event.index;
+  return typeof li === 'number' && Number.isFinite(li) ? li : 0;
+}
+
+let gap_fill_timer = null;
 let is_active = true;
 let contract = null;
 let provider = null;
+let watched_contract_address = null;
+let on_event_callback = null;
 
 // Track last processed event to avoid duplicates (block + logIndex uniquely identifies an event)
 let lastProcessedBlock = 0;
@@ -26,9 +43,10 @@ function get_last_processed_event(contract_address) {
     // Try to parse as JSON first (new format)
     try {
       const data = JSON.parse(content);
+      const rawLi = 'logIndex' in data ? data.logIndex : -1;
       return {
         block: data.block || 0,
-        logIndex: data.logIndex !== undefined ? data.logIndex : -1
+        logIndex: normalizeStoredLogIndex(rawLi)
       };
     } catch {
       // Fall back to old format (just block number)
@@ -103,6 +121,7 @@ async function get_past_events(contract_instance, contract_address, on_contract_
   // EVM has limits on how many blocks we can query at once (typically 10000)
   const BLOCK_RANGE = 10000;
 
+  let scanCompleted = true;
   while (start_block <= last_block) {
     let end_block = start_block + BLOCK_RANGE - 1;
     if (end_block > last_block) end_block = last_block;
@@ -119,24 +138,38 @@ async function get_past_events(contract_instance, contract_address, on_contract_
           if (a.blockNumber !== b.blockNumber) {
             return a.blockNumber - b.blockNumber;
           }
-          return a.logIndex - b.logIndex;
+          return eventLogIndex(a) - eventLogIndex(b);
         });
 
         // Process each event
         for (const event of allEvents) {
           if (!is_active) return;
 
+          const idx = eventLogIndex(event);
           // Skip events we've already processed
           if (event.blockNumber < lastProcessedBlock ||
-              (event.blockNumber === lastProcessedBlock && event.logIndex <= lastProcessedLogIndex)) {
+              (event.blockNumber === lastProcessedBlock && idx <= lastProcessedLogIndex)) {
             continue;
           }
 
-          on_contract_event_callback(event, false);
+          // Normalize like subscription path: same shape as handle_subscription_event (ethers v6 EventLog)
+          const eventName = event.fragment?.name || event.eventName;
+          if (!eventName) {
+            continue;
+          }
+          const normalizedEvent = {
+            eventName,
+            args: event.args,
+            blockNumber: event.blockNumber,
+            index: idx,
+            transactionHash: event.transactionHash
+          };
+
+          on_contract_event_callback(normalizedEvent, false);
 
           // Track the last processed event
           lastProcessedBlock = event.blockNumber;
-          lastProcessedLogIndex = event.logIndex;
+          lastProcessedLogIndex = idx;
         }
       }
 
@@ -144,17 +177,17 @@ async function get_past_events(contract_instance, contract_address, on_contract_
 
     } catch (err) {
       console.error('Error fetching events from block range:', start_block, 'to', end_block, err);
+      scanCompleted = false;
+      break;
     }
 
     start_block = end_block + 1;
   }
 
-  // Update the last processed event (in memory and file)
-  // If we processed events, lastProcessedBlock/logIndex are already set
-  // If no events, we still need to update to last_block to mark that range as processed
-  if (lastProcessedBlock < last_block) {
+  // Only advance tail watermark after a full successful scan; otherwise we would skip logs in failed ranges.
+  if (scanCompleted && lastProcessedBlock < last_block) {
     lastProcessedBlock = last_block;
-    lastProcessedLogIndex = Infinity;  // No events in this block, skip all from subscription
+    lastProcessedLogIndex = MAX_PROCESSED_LOG_INDEX;
   }
   write_last_processed_event(contract_address, lastProcessedBlock, lastProcessedLogIndex);
 }
@@ -185,72 +218,63 @@ function handle_subscription_event(decodedEvent, contract_address, on_contract_e
 async function subscribe_to_events(contract_instance, contract_address, on_contract_event_callback) {
   console.log("Subscribing to events from contract", contract_address, "...");
 
-  // Get the contract address we're subscribing to
-  const targetAddress = await contract_instance.getAddress();
+  const targetAddress = (await contract_instance.getAddress()).toLowerCase();
 
-  // Use wildcard to listen to all events from this contract
-  contract_instance.on("*", (event) => {
-    const rawLog = event.log;
-    if (!rawLog) return;
+  try {
+    await contract_instance.on('*', (...cbArgs) => {
+      const payload = cbArgs[cbArgs.length - 1];
+      const rawLog = payload?.log;
+      if (!rawLog) return;
 
-    // Filter - only process events from our contract
-    if (rawLog.address.toLowerCase() !== targetAddress.toLowerCase()) {
-      return;
-    }
-
-    // Decode the log using the contract's interface
-    try {
-      const parsed = contract_instance.interface.parseLog({
-        topics: rawLog.topics,
-        data: rawLog.data
-      });
-
-      if (parsed) {
-        const decodedEvent = {
-          eventName: parsed.name,
-          args: parsed.args,
-          blockNumber: rawLog.blockNumber,
-          index: rawLog.index,
-          transactionHash: rawLog.transactionHash
-        };
-
-        handle_subscription_event(decodedEvent, contract_address, on_contract_event_callback);
+      if (rawLog.address.toLowerCase() !== targetAddress) {
+        return;
       }
-    } catch (err) {
-      // Silently ignore parse errors - event might be from an inherited contract
-    }
-  });
+
+      const eventName = payload.eventName ?? payload.fragment?.name;
+      if (!eventName) {
+        return;
+      }
+
+      const decodedEvent = {
+        eventName,
+        args: payload.args,
+        blockNumber: rawLog.blockNumber,
+        index: rawLog.index,
+        transactionHash: rawLog.transactionHash
+      };
+
+      handle_subscription_event(decodedEvent, contract_address, on_contract_event_callback);
+    });
+  } catch (err) {
+    console.error('Failed to subscribe to contract events (wildcard):', err.message);
+    throw err;
+  }
 
   console.log("Subscribed to all events for contract", contract_address);
 }
 
-// Update block height periodically
-async function update_block_height(contract_address) {
+// Periodic gap-fill: re-runs getLogs from last checkpoint to head (catches missed WS deliveries).
+async function periodic_gap_fill() {
+  if (!is_active || !contract || !on_event_callback || !watched_contract_address || lastProcessedBlock === 0) {
+    gap_fill_timer = setTimeout(periodic_gap_fill, 3 * 60 * 1000);
+    return;
+  }
   try {
-    const blockNumber = await provider.getBlockNumber();
-    console.log("Current block:", blockNumber);
-    // Update to current block with Infinity logIndex (no events to process)
-    // Only update if we haven't processed a more recent event in the meantime
-    if (lastProcessedBlock < blockNumber) {
-      lastProcessedBlock = blockNumber;
-      lastProcessedLogIndex = Infinity;
-      write_last_processed_event(contract_address, blockNumber, Infinity);
-    }
+    await get_past_events(contract, watched_contract_address, on_event_callback);
   } catch (err) {
-    console.error('Error updating block height:', err);
+    console.error('Gap-fill error:', err);
   }
 
-  block_height_update_timer = setTimeout(() => {
-    update_block_height(contract_address);
-  }, 180 * 1000);  // 3 minutes
+  gap_fill_timer = setTimeout(periodic_gap_fill, 3 * 60 * 1000);
 }
 
 async function terminate_event_handling() {
   console.log("Terminating event handling...");
   is_active = false;
 
-  if (block_height_update_timer) {
-    clearTimeout(block_height_update_timer);
+  if (gap_fill_timer) {
+    clearTimeout(gap_fill_timer);
+    gap_fill_timer = null;
   }
 
   if (contract) {
@@ -262,6 +286,8 @@ async function initialize_event_handling(provider_instance, contract_instance, c
   // Store references
   provider = provider_instance;
   contract = contract_instance;
+  watched_contract_address = contract_address;
+  on_event_callback = on_contract_event_callback;
 
   if (typeof on_contract_event_callback !== 'function') {
     throw new Error('on_contract_event_callback must be a function');
@@ -291,8 +317,9 @@ async function initialize_event_handling(provider_instance, contract_instance, c
   // Subscribe to new events
   await subscribe_to_events(contract_instance, contract_address, on_contract_event_callback);
 
-  // Start periodic block height updates
-  update_block_height(contract_address);
+  if (!gap_fill_timer) {
+    gap_fill_timer = setTimeout(periodic_gap_fill, 3 * 60 * 1000);
+  }
 }
 
 module.exports = {
