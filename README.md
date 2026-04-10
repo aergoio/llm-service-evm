@@ -6,13 +6,18 @@ Smart contracts can request LLM completions, which are processed by authorized o
 
 ## Components
 
-### Smart Contract
+### Smart Contracts
 
-[Solidity contract](contract/llm-service.sol) that:
-- Accepts LLM requests from other contracts (paid in native token)
+[LLM Service](contract/llm-service.sol):
+- Accepts LLM requests from other contracts
 - Manages authorized nodes and pricing per platform/model
 - Supports redundancy (multiple nodes must agree on result)
 - Fires callbacks with results to the requesting contract
+- Payments are done using accepted ERC-20 tokens, either via `transferAndCall` or `approve` + `transferFrom`
+
+[LLM Quorum](contract/llm-quorum.sol):
+- Runs the same prompt and input across several models
+- Fires callbacks with results to the requesting contract when the consensus is reached
 
 ### Backend Nodes
 
@@ -60,7 +65,11 @@ The node generates an account on first run (saved to `nodes/account.data`). Add 
 
 ### Contract Integration
 
-From another Solidity contract:
+Callers must be contract (not EOAs). Use an ERC-20 that the service accepts. Amount must be at least `getPriceInToken(platform, model, token).amount * redundancy` (quorum: sum per model × redundancy). Excess payment is not refunded.
+
+#### Approve + `newRequest`
+
+From another contract:
 
 ```solidity
 import "./llm-service.sol";
@@ -68,23 +77,37 @@ import "./llm-service.sol";
 contract MyContract is ILLMServiceCallback {
     ILLMService public llmService;
 
-    function askLLM(bytes32 configHash, string calldata userInput) external payable {
+    function askLLM(
+        bytes32 configHash,
+        string calldata userInput,
+        address token,
+        uint256 amount
+    ) external returns (uint256 requestId) {
+
+        // Pull ERC-20 from caller, then let LLMService pull from this contract
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "pull failed");
+        require(IERC20(token).approve(address(llmService), amount), "approve failed");
+
         // Build input JSON with values (can reference off-chain stored content by hash)
         string memory input = string(abi.encodePacked(
             '{"user_input":"', userInput, '"}'
         ));
 
         // Call the LLM service
-        uint256 requestId = llmService.newRequest{value: msg.value}(
-            bytes32(0),          // platform (use from config)
-            bytes32(0),          // model (use from config)
-            configHash,          // SHA256 hash of prompt config
-            input,               // JSON input string
-            1,                   // redundancy (nodes that must agree)
-            true,                // extract content from <result> tags
-            false,               // store result on-chain (not off-chain)
-            "handleLLMResult",   // callback function name
-            abi.encode(msg.sender) // extra args passed to callback
+        requestId = llmService.newRequest(
+            RequestArgs({
+                platform: bytes32(0),                    // platform (use from config)
+                model: bytes32(0),                       // model (use from config)
+                prompt: configHash,                      // SHA256 hash of prompt config
+                input: input,                            // JSON input string
+                redundancy: 1,                           // redundancy (nodes that must agree)
+                returnContentWithinResultTag: true,      // extract content from <result> tags
+                storeResultOffchain: false,              // store result on-chain (not off-chain)
+                callback: "handleLLMResult",             // callback function name
+                args: abi.encode(msg.sender)             // extra args passed to callback
+            }),
+            token,                                       // ERC-20 payment token
+            amount                                       // must cover price × redundancy; excess not refunded
         );
     }
 
@@ -102,7 +125,38 @@ contract MyContract is ILLMServiceCallback {
 }
 ```
 
-See the [complete example contract](example/example-usage.sol) for a working implementation.
+#### `transferAndCall`
+
+```solidity
+// IERC20 — token must implement transferAndCall(address,uint256,bytes)
+interface IERC20 {
+    function transferAndCall(address to, uint256 amount, bytes calldata data) external returns (bool);
+}
+
+// Inside your ILLMServiceCallback contract (after pulling `amount` from the user to address(this)):
+// Build input JSON (same as above), then encode the same payload as `newRequest`:
+bytes memory data = abi.encode(
+    RequestArgs({
+        platform: bytes32(0),                    // platform (use from config)
+        model: bytes32(0),                       // model (use from config)
+        prompt: configHash,                      // SHA256 hash of prompt config
+        input: input,                            // JSON input string
+        redundancy: 1,                           // redundancy (nodes that must agree)
+        returnContentWithinResultTag: true,      // extract content from <result> tags
+        storeResultOffchain: false,              // store result on-chain (not off-chain)
+        callback: "handleLLMResult",             // callback function name
+        args: abi.encode(msg.sender)             // extra args passed to callback
+    })
+);
+
+bool success = IERC20(token).transferAndCall(address(llmService), amount, data);
+require(success, "transferAndCall failed");
+
+uint256 requestId = LLMService(address(llmService)).lastRequestId();
+```
+
+Working examples: [single-model](example/llm-service-example-usage.sol), [quorum](example/llm-quorum-example-usage.sol)
+
 
 ### Prompt Config Format
 

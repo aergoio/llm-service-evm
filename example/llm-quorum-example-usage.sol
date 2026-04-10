@@ -3,10 +3,15 @@ pragma solidity ^0.8.20;
 
 import "../contract/llm-quorum.sol";
 
+/// @dev ERC-677 / Arbitrum-style: debits `msg.sender`, credits `to`, then `to.onTokenTransfer(msg.sender, amount, data)`
+interface IERC20 {
+    function transferAndCall(address to, uint256 amount, bytes calldata data) external returns (bool);
+}
+
 /**
  * @title LLMQuorumTest
  * @notice A simple test contract to interact with the LLM Quorum service
- * @dev Demonstrates basic request/callback flow with multi-model consensus
+ * @dev Demonstrates basic request/callback flow with multi-model consensus (ERC-20 via approve + newRequest, or transferAndCall).
  */
 contract LLMQuorumTest is ILLMQuorumCallback {
     // ============================================================
@@ -47,7 +52,7 @@ contract LLMQuorumTest is ILLMQuorumCallback {
         require(_quorumService != address(0), "LLMQuorumTest: invalid service address");
 
         owner = msg.sender;
-        quorumService = LLMQuorum(payable(_quorumService));
+        quorumService = LLMQuorum(_quorumService);
     }
 
     // ============================================================
@@ -60,7 +65,7 @@ contract LLMQuorumTest is ILLMQuorumCallback {
      */
     function setQuorumServiceAddress(address _quorumService) external onlyOwner {
         require(_quorumService != address(0), "LLMQuorumTest: invalid service address");
-        quorumService = LLMQuorum(payable(_quorumService));
+        quorumService = LLMQuorum(_quorumService);
         emit ServiceAddressUpdated(_quorumService);
     }
 
@@ -73,13 +78,21 @@ contract LLMQuorumTest is ILLMQuorumCallback {
      * @param configHash Hash of the config/prompt file
      * @param userInput The user's input string
      * @param models Array of models to query for consensus
+     * @param token ERC-20 accepted on the underlying LLMService
+     * @param amount Pulled from msg.sender and forwarded (must cover total; excess not refunded)
      * @return requestId The LLM Quorum service request ID
      */
     function newRequest(
         bytes32 configHash,
         string calldata userInput,
-        LLMQuorum.ModelInfo[] calldata models
-    ) external payable returns (uint256 requestId) {
+        LLMQuorum.ModelInfo[] calldata models,
+        address token,
+        uint256 amount
+    ) external returns (uint256 requestId) {
+
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMQuorumTest: pull failed");
+        require(IERC20(token).approve(address(quorumService), amount), "LLMQuorumTest: approve failed");
+
         // Build the input JSON string
         string memory input = string(abi.encodePacked(
             '{"user_input":"',
@@ -89,16 +102,20 @@ contract LLMQuorumTest is ILLMQuorumCallback {
 
         // Call the LLM Quorum service
         // Parameters: prompt, input, models, quorumThreshold, redundancy, returnContentWithinResultTag, storeResultOffchain, callback, args
-        requestId = quorumService.newRequest{value: msg.value}(
-            configHash,                    // prompt hash
-            input,                         // JSON input
-            models,                        // array of models to query
-            0,                             // quorum threshold (0 = majority)
-            1,                             // redundancy of 1 per model
-            true,                          // return content within result tag
-            false,                         // don't store result off-chain
-            "handleQuorumResult",          // callback function
-            abi.encode(msg.sender)         // encode sender address as args
+        requestId = quorumService.newRequest(
+            LLMQuorum.QuorumRequestArgs({
+                prompt: configHash,             // prompt hash
+                input: input,                   // JSON input
+                models: models,                 // array of models to query
+                quorumThreshold: 0,             // quorum threshold (0 = majority)
+                redundancy: 1,                  // redundancy of 1 per model
+                returnContentWithinResultTag: true, // return content within result tag
+                storeResultOffchain: false,     // don't store result off-chain
+                callback: "handleQuorumResult", // callback function
+                args: abi.encode(msg.sender)    // encode sender address as args
+            }),
+            token, // ERC-20 payment token
+            amount // amount approved to quorum (must cover total; excess not refunded)
         );
 
         emit RequestSubmitted(requestId, msg.sender, configHash);
@@ -107,15 +124,67 @@ contract LLMQuorumTest is ILLMQuorumCallback {
     }
 
     /**
-     * @notice Submit a simple request using default models (GPT-4 and Claude)
+     * @notice Same as `newRequest`, but pays via `transferAndCall(quorumService, amount, abi.encode(QuorumRequestArgs))`
+     * @dev Token must implement `transferAndCall`. Pull to this contract first so quorum `onTokenTransfer`'s `from` is this contract.
+     */
+    function newRequestViaTransferAndCall(
+        bytes32 configHash,
+        string calldata userInput,
+        LLMQuorum.ModelInfo[] calldata models,
+        address token,
+        uint256 amount
+    ) external returns (uint256 requestId) {
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMQuorumTest: pull failed");
+
+        // Build the input JSON string
+        string memory input = string(abi.encodePacked(
+            '{"user_input":"',
+            userInput,
+            '"}'
+        ));
+
+        // Parameters: prompt, input, models, quorumThreshold, redundancy, returnContentWithinResultTag, storeResultOffchain, callback, args
+        bytes memory data = abi.encode(
+            LLMQuorum.QuorumRequestArgs({
+                prompt: configHash,             // prompt hash
+                input: input,                   // JSON input
+                models: models,                 // array of models to query
+                quorumThreshold: 0,             // quorum threshold (0 = majority)
+                redundancy: 1,                  // redundancy of 1 per model
+                returnContentWithinResultTag: true, // return content within result tag
+                storeResultOffchain: false,     // don't store result off-chain
+                callback: "handleQuorumResult", // callback function
+                args: abi.encode(msg.sender)    // encode sender address as args
+            })
+        );
+
+        bool success = IERC20(token).transferAndCall(address(quorumService), amount, data);
+        require(success, "LLMQuorumTest: transferAndCall failed");
+
+        requestId = quorumService.lastRequestId();
+
+        emit RequestSubmitted(requestId, msg.sender, configHash);
+        return requestId;
+    }
+
+    /**
+     * @notice Submit a request using a fixed set of three models (full quorum)
      * @param configHash Hash of the config/prompt file
      * @param userInput The user's input string
+     * @param token ERC-20 accepted on the underlying LLMService
+     * @param amount Pulled from msg.sender and forwarded (must cover total; excess not refunded)
      * @return requestId The LLM Quorum service request ID
      */
     function newRequestWithDefaultModels(
         bytes32 configHash,
-        string calldata userInput
-    ) external payable returns (uint256 requestId) {
+        string calldata userInput,
+        address token,
+        uint256 amount
+    ) external returns (uint256 requestId) {
+
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMQuorumTest: pull failed");
+        require(IERC20(token).approve(address(quorumService), amount), "LLMQuorumTest: approve failed");
+
         // Build the input JSON string
         string memory input = string(abi.encodePacked(
             '{"user_input":"',
@@ -134,25 +203,85 @@ contract LLMQuorumTest is ILLMQuorumCallback {
             model: bytes32("deepseek-chat")
         });
         models[2] = LLMQuorum.ModelInfo({
-          platform: bytes32("anthropic"),
-          model: bytes32("claude-sonnet-4-5-20250929")
+            platform: bytes32("anthropic"),
+            model: bytes32("claude-sonnet-4-5-20250929")
         });
 
         // Call the LLM Quorum service
-        requestId = quorumService.newRequest{value: msg.value}(
-            configHash,                    // prompt hash
-            input,                         // JSON input
-            models,                        // array of models to query
-            3,                             // quorum threshold (all 3 models must agree)
-            1,                             // redundancy of 1 per model
-            true,                          // return content within result tag
-            false,                         // don't store result off-chain
-            "handleQuorumResult",          // callback function
-            abi.encode(msg.sender)         // encode sender address as args
+        requestId = quorumService.newRequest(
+            LLMQuorum.QuorumRequestArgs({
+                prompt: configHash,             // prompt hash
+                input: input,                   // JSON input
+                models: models,                 // array of models to query
+                quorumThreshold: 0,             // quorum threshold (0 = majority)
+                redundancy: 1,                  // redundancy of 1 per model
+                returnContentWithinResultTag: true, // return content within result tag
+                storeResultOffchain: false,     // don't store result off-chain
+                callback: "handleQuorumResult", // callback function
+                args: abi.encode(msg.sender)    // encode sender address as args
+            }),
+            token, // ERC-20 payment token
+            amount // amount approved to quorum (must cover total; excess not refunded)
         );
 
         emit RequestSubmitted(requestId, msg.sender, configHash);
 
+        return requestId;
+    }
+
+    /**
+     * @notice Same as `newRequestWithDefaultModels`, but pays via `transferAndCall`
+     */
+    function newRequestWithDefaultModelsViaTransferAndCall(
+        bytes32 configHash,
+        string calldata userInput,
+        address token,
+        uint256 amount
+    ) external returns (uint256 requestId) {
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMQuorumTest: pull failed");
+
+        // Build the input JSON string
+        string memory input = string(abi.encodePacked(
+            '{"user_input":"',
+            userInput,
+            '"}'
+        ));
+
+        // Create a dynamic array of models
+        LLMQuorum.ModelInfo[] memory models = new LLMQuorum.ModelInfo[](3);
+        models[0] = LLMQuorum.ModelInfo({
+            platform: bytes32("openai"),
+            model: bytes32("gpt-5")
+        });
+        models[1] = LLMQuorum.ModelInfo({
+            platform: bytes32("deepseek"),
+            model: bytes32("deepseek-chat")
+        });
+        models[2] = LLMQuorum.ModelInfo({
+            platform: bytes32("anthropic"),
+            model: bytes32("claude-sonnet-4-5-20250929")
+        });
+
+        bytes memory data = abi.encode(
+            LLMQuorum.QuorumRequestArgs({
+                prompt: configHash,             // prompt hash
+                input: input,                   // JSON input
+                models: models,                 // array of models to query
+                quorumThreshold: 0,             // quorum threshold (0 = majority)
+                redundancy: 1,                  // redundancy of 1 per model
+                returnContentWithinResultTag: true, // return content within result tag
+                storeResultOffchain: false,     // don't store result off-chain
+                callback: "handleQuorumResult", // callback function
+                args: abi.encode(msg.sender)    // encode sender address as args
+            })
+        );
+
+        bool success = IERC20(token).transferAndCall(address(quorumService), amount, data);
+        require(success, "LLMQuorumTest: transferAndCall failed");
+
+        requestId = quorumService.lastRequestId();
+
+        emit RequestSubmitted(requestId, msg.sender, configHash);
         return requestId;
     }
 

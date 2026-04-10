@@ -3,10 +3,15 @@ pragma solidity ^0.8.20;
 
 import "../contract/llm-service.sol";
 
+/// @dev ERC-677 / Arbitrum-style: debits `msg.sender`, credits `to`, then `to.onTokenTransfer(msg.sender, amount, data)`
+interface IERC20 {
+    function transferAndCall(address to, uint256 amount, bytes calldata data) external returns (bool);
+}
+
 /**
  * @title LLMTest
  * @notice A simple test contract to interact with the LLM service
- * @dev Demonstrates basic request/callback flow with the LLM oracle
+ * @dev Demonstrates basic request/callback flow with the LLM oracle (ERC-20 payment via approve + newRequest, or transferAndCall).
  */
 contract LLMTest is ILLMServiceCallback {
     // ============================================================
@@ -72,9 +77,21 @@ contract LLMTest is ILLMServiceCallback {
      * @notice Submit a new LLM request
      * @param configHash Hash of the config/prompt file
      * @param userInput The user's input string
+     * @param token ERC-20 accepted on the service (`acceptedToken[token] != 0`)
+     * @param amount Pulled from msg.sender and forwarded (must cover price × redundancy; excess not refunded)
      * @return requestId The LLM service request ID
      */
-    function newRequest(bytes32 configHash, string calldata userInput) external payable returns (uint256 requestId) {
+    function newRequest(
+        bytes32 configHash,
+        string calldata userInput,
+        address token,
+        uint256 amount
+    ) external returns (uint256 requestId) {
+
+        // Pull the ERC-20 from the caller and approve the LLM service
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMTest: pull failed");
+        require(IERC20(token).approve(address(llmService), amount), "LLMTest: approve failed");
+
         // Build the input JSON string
         string memory input = string(abi.encodePacked(
             '{"user_input":"',
@@ -83,21 +100,69 @@ contract LLMTest is ILLMServiceCallback {
         ));
 
         // Call the LLM service
-        // Parameters: platform, model, prompt, input, redundancy, returnContentWithinResultTag, storeResultOffchain, callback, args
-        requestId = llmService.newRequest{value: msg.value}(
-            bytes32(0),                    // platform (use from config)
-            bytes32(0),                    // model (use from config)
-            configHash,                    // prompt hash
-            input,                         // JSON input
-            1,                             // redundancy of 1
-            true,                          // return content within result tag
-            false,                         // don't store result off-chain
-            "handleLLMResult",             // callback function
-            abi.encode(msg.sender)         // encode sender address as args
+        requestId = llmService.newRequest(
+            RequestArgs({
+                platform: bytes32(0),        // platform (use from config)
+                model: bytes32(0),           // model (use from config)
+                prompt: configHash,          // prompt hash
+                input: input,                // JSON input
+                redundancy: 1,               // redundancy of 1
+                returnContentWithinResultTag: true, // return content within result tag
+                storeResultOffchain: false,  // don't store result off-chain
+                callback: "handleLLMResult", // callback function
+                args: abi.encode(msg.sender) // encode sender address as args
+            }),
+            token, // ERC-20 payment token
+            amount // amount approved to service (must cover price; excess not refunded)
         );
 
         emit RequestSubmitted(requestId, msg.sender, configHash);
 
+        return requestId;
+    }
+
+    /**
+     * @notice Same as `newRequest`, but pays via `token.transferAndCall(llmService, amount, abi.encode(RequestArgs))`
+     * @dev Token must implement `transferAndCall`. Funds are pulled to this contract first so `onTokenTransfer`'s `from` is this contract (contracts-only rule). `lastRequestId` is read after the call.
+     */
+    function newRequestViaTransferAndCall(
+        bytes32 configHash,
+        string calldata userInput,
+        address token,
+        uint256 amount
+    ) external returns (uint256 requestId) {
+        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "LLMTest: pull failed");
+
+        // Build the input JSON string
+        string memory input = string(abi.encodePacked(
+            '{"user_input":"',
+            userInput,
+            '"}'
+        ));
+
+        // Build the request arguments
+        bytes memory data = abi.encode(
+            RequestArgs({
+                platform: bytes32(0),        // platform (use from config)
+                model: bytes32(0),           // model (use from config)
+                prompt: configHash,          // prompt hash
+                input: input,                // JSON input
+                redundancy: 1,               // redundancy of 1
+                returnContentWithinResultTag: true, // return content within result tag
+                storeResultOffchain: false,  // don't store result off-chain
+                callback: "handleLLMResult", // callback function
+                args: abi.encode(msg.sender) // encode sender address as args
+            })
+        );
+
+        // Call the LLM service
+        bool success = IERC20(token).transferAndCall(address(llmService), amount, data);
+        require(success, "LLMTest: transferAndCall failed");
+
+        // Get the request ID
+        requestId = LLMService(address(llmService)).lastRequestId();
+
+        emit RequestSubmitted(requestId, msg.sender, configHash);
         return requestId;
     }
 
