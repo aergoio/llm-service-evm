@@ -43,9 +43,6 @@ struct RequestArgs {
  *      - approve + newRequest (transferFrom), or
  *      - token.transferAndCall(service, amount, abi.encode(RequestArgs)) → onTokenTransfer
  *
- *      Pricing: `prices[platform][model]` is in US cents (50 = USD 0.50), `FREE_TIER` for free models, or `0`
- *      for unsupported (`getPrice` returns `(0, false)`). There is no default-key fallback; each tier is read directly.
- *
  *      Token amount = `priceCents * acceptedToken[token]`. Set `acceptedToken` to **10^(decimals - 2)** so cents
  *      map to smallest units (e.g. USDT 6 decimals → 10^4; 50 cents × 10^4 = 500_000). Requires decimals >= 2.
  *      `acceptedToken[token] == 0` means that token is not accepted. Excess payment is not refunded.
@@ -77,11 +74,11 @@ contract LLMService {
     /// @notice Per-token multiplier: price (cents) × ratio = amount in token smallest units (0 = not accepted)
     mapping(address => uint256) public acceptedToken;
 
-    /// @notice US cents per redundancy unit, `FREE_TIER` for free models, or 0 (unsupported — see getPrice)
+    /// @notice US cents per redundancy unit, `MODEL_NOT_SUPPORTED` for unsupported models
     mapping(bytes32 => mapping(bytes32 => uint256)) public prices;
 
-    /// @dev Sentinel in `prices`: tier is offered at no charge (`getPrice` returns `(0, true)`)
-    uint256 public constant FREE_TIER = type(uint256).max;
+    /// @dev Sentinel: model is not offered
+    uint256 public constant MODEL_NOT_SUPPORTED = type(uint256).max;
 
     /// @dev Second return value of `getPriceInToken`
     uint8 public constant PRICE_IN_TOKEN_OK = 0;
@@ -210,8 +207,10 @@ contract LLMService {
     // ============================================================
 
     /**
-     * @notice Set the price for a platform/model combination (US cents per redundancy unit)
-     * @param price Cents (50 = USD 0.50), `FREE_TIER` for a free model, or 0 (unsupported)
+     * @notice Set the price for a platform/model (US cents per redundancy unit)
+     * @param model `bytes32("*")` for the default that applies to all models on `platform` unless overridden
+     * @param price Cents for paid tiers; `MODEL_NOT_SUPPORTED` to exclude that model; `0` clears the slot (per-model
+     *        `0` → `getPrice` uses `prices[platform][bytes32("*")]`; default key + `0` removes the platform default)
      */
     function setPrice(bytes32 platform, bytes32 model, uint256 price) external onlyOwner {
         prices[platform][model] = price;
@@ -230,18 +229,19 @@ contract LLMService {
 
     /**
      * @notice Resolved price in US cents (per redundancy unit) and whether the tier is offered
-     * @dev Stored `0` → unsupported. `FREE_TIER` → free `(0, true)`.
+     * @dev Reads `prices[platform][model]` first. Only when that value is `0` (unset) does it read
+     *      `prices[platform][bytes32("*")]`. Resolved unsupported if value is `0` or `MODEL_NOT_SUPPORTED`.
      */
     function getPrice(bytes32 platform, bytes32 model) public view returns (uint256 priceCents, bool supported) {
-        uint256 raw = prices[platform][model];
+        uint256 price = prices[platform][model];
+        if (price == 0) {
+            price = prices[platform][bytes32("*")];
+        }
 
-        if (raw == 0) {
+        if (price == 0 || price == MODEL_NOT_SUPPORTED) {
             return (0, false);
         }
-        if (raw == FREE_TIER) {
-            return (0, true);
-        }
-        return (raw, true);
+        return (price, true);
     }
 
     /**

@@ -184,7 +184,7 @@ contract LLMQuorum {
      * @dev msg.sender must be the payment token. Tokens are already in this contract; `from` is the logical caller (must be a contract).
      *      `data` must be abi.encode(QuorumRequestArgs).
      */
-     function onTokenTransfer(address from, uint256 amount, bytes calldata data) external {
+    function onTokenTransfer(address from, uint256 amount, bytes calldata data) external {
         address token = msg.sender;
         QuorumRequestArgs memory req = abi.decode(data, (QuorumRequestArgs));
         _newQuorumRequest(from, token, amount, req);
