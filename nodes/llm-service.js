@@ -154,8 +154,46 @@ contract_address = networkConfig.contract;
 console.log(`Running on ${network_name} network`);
 console.log(`Contract address: ${contract_address}`);
 
-// Initialize provider
-provider = new ethers.JsonRpcProvider(networkConfig.rpc);
+// Initialize provider. Prefer WebSocket when configured so we receive events in
+// real-time rather than polling eth_blockNumber every 4 s (ethers JsonRpcProvider default).
+if (networkConfig.wss) {
+  console.log(`Using WebSocket provider: ${networkConfig.wss}`);
+  provider = new ethers.WebSocketProvider(networkConfig.wss);
+  setup_wss_health(provider);
+} else {
+  provider = new ethers.JsonRpcProvider(networkConfig.rpc);
+}
+
+/**
+ * If the WebSocket closes or a 2-minute ping isn't acknowledged, exit so PM2
+ * restarts the process with a fresh connection. Ethers v6 doesn't reconnect on
+ * close (see provider-websocket.ts) and private RPC nodes can silently drop
+ * TCP — ping/pong catches the half-open case too.
+ */
+function setup_wss_health(wssProvider) {
+  let ws;
+  try { ws = wssProvider.websocket; } catch { return; }
+  if (!ws || typeof ws.on !== 'function') return;
+
+  const exitForRestart = (reason) => {
+    console.error(`[WSS] ${reason} — exiting for PM2 restart`);
+    process.exit(1);
+  };
+
+  ws.on('close', (code) => exitForRestart(`socket closed (code=${code})`));
+  ws.on('error', (err) => console.error('[WSS] socket error:', err && err.message ? err.message : err));
+
+  let pongReceived = true;
+  ws.on('pong', () => { pongReceived = true; });
+  setInterval(() => {
+    if (!pongReceived) return exitForRestart('no pong within keep-alive window');
+    pongReceived = false;
+    try {
+      if (ws.readyState === 1 /* OPEN */ && typeof ws.ping === 'function') ws.ping();
+      else exitForRestart(`socket not open (readyState=${ws.readyState})`);
+    } catch (err) { exitForRestart(`ping threw: ${err.message}`); }
+  }, 2 * 60 * 1000);
+}
 
 // Read or generate an account for this node
 try {
