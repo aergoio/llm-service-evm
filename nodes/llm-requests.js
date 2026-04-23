@@ -29,23 +29,22 @@ async function process_llm_request(platform, model, prompt) {
         return await process_openai_request(model, prompt);
       case 'anthropic':
         return await process_anthropic_request(model, prompt);
-      case 'gemini':
-        return await process_gemini_request(model, prompt);
-      case 'grok':
-        return await process_grok_request(model, prompt);
+      case 'google':
+        return await process_google_request(model, prompt);
+      case 'xai':
+        return await process_xai_request(model, prompt);
       case 'groq':
         return await process_groq_request(model, prompt);
       case 'deepseek':
         return await process_deepseek_request(model, prompt);
-      case 'qwen':
-        return await process_qwen_request(model, prompt);
-      case 'kimi':
-        return await process_kimi_request(model, prompt);
+      case 'alibaba':
+        return await process_alibaba_request(model, prompt);
+      case 'moonshot':
+        return await process_moonshot_request(model, prompt);
+      case 'zai':
+        return await process_zai_request(model, prompt);
       case 'perplexity':
         return await process_perplexity_request(model, prompt);
-      case 'zai':
-      case 'zhipu':
-        return await process_zai_request(model, prompt);
       default:
         throw new Error(`Unsupported platform: ${platform}`);
     }
@@ -133,12 +132,12 @@ async function process_anthropic_request(model, prompt) {
 }
 
 /**
- * Process a request using Google's Gemini API
- * @param {string} model - The Gemini model to use (e.g., "gemini-pro")
+ * Process a request using Google Gemini API
+ * @param {string} model - The Gemini model id (e.g., "gemini-pro", "gemini-3-pro-preview")
  * @param {string} prompt - The user prompt
  * @returns {Promise<string>} - The model's response
  */
-async function process_gemini_request(model, prompt) {
+async function process_google_request(model, prompt) {
   if (!GEMINI_API_KEY) {
     throw new Error('GEMINI_API_KEY environment variable is not set');
   }
@@ -178,12 +177,12 @@ async function process_gemini_request(model, prompt) {
 }
 
 /**
- * Process a request using Grok's API
- * @param {string} model - The Grok model to use (e.g., "grok-1")
+ * Process a request using xAI (Grok) API
+ * @param {string} model - The xAI model to use (e.g., "grok-4")
  * @param {string} prompt - The user prompt
  * @returns {Promise<string>} - The model's response
  */
-async function process_grok_request(model, prompt) {
+async function process_xai_request(model, prompt) {
   if (!GROK_API_KEY) {
     throw new Error('GROK_API_KEY environment variable is not set');
   }
@@ -239,12 +238,12 @@ async function process_deepseek_request(model, prompt) {
 }
 
 /**
- * Process a request using Qwen's API
- * @param {string} model - The Qwen model to use (e.g., "qwen-turbo", "qwen-plus")
+ * Process a request using Alibaba Cloud DashScope (Qwen) API
+ * @param {string} model - The Qwen model id (e.g., "qwen-turbo", "qwen-plus")
  * @param {string} prompt - The user prompt
  * @returns {Promise<string>} - The model's response
  */
-async function process_qwen_request(model, prompt) {
+async function process_alibaba_request(model, prompt) {
   if (!QWEN_API_KEY) {
     throw new Error('QWEN_API_KEY environment variable is not set');
   }
@@ -303,12 +302,12 @@ async function process_groq_request(model, prompt) {
 }
 
 /**
- * Process a request using Kimi (Moonshot) API
- * @param {string} model - The Kimi model to use (e.g., "kimi-thinking-preview")
+ * Process a request using Moonshot (Kimi) API
+ * @param {string} model - The Moonshot model to use (e.g., "kimi-thinking-preview")
  * @param {string} prompt - The user prompt
  * @returns {Promise<string>} - The model's response
  */
-async function process_kimi_request(model, prompt) {
+async function process_moonshot_request(model, prompt) {
   if (!MOONSHOT_API_KEY) {
     throw new Error('MOONSHOT_API_KEY environment variable is not set');
   }
